@@ -1,0 +1,26 @@
+{
+  "name": "gtfs-realtime-cache-server",
+  "version": "1.0.0",
+  "description": "",
+  "main": "server.ts",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "Chris Dirks",
+  "license": "MIT",
+  "type": "commonjs",
+  "dependencies": {
+    "compression": "^1.8.0",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "@types/compression": "^1.7.5",
+    "@types/express": "^5.0.0",
+    "compression": "^1.8.0",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "typescript": "^5.8.2"
+  }
+}

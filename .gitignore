@@ -1,0 +1,26 @@
+# .gitignore
+
+# Dependencies
+node_modules/
+
+# Environment files
+.env
+docker.env
+
+# Bun files
+*.lockb
+
+# Logs
+logs/
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.override.yml

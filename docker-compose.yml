@@ -1,0 +1,14 @@
+# docker-compose.yml
+version: '3.8'
+
+services:
+  gtfs-cache:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+    volumes:
+      - .:/usr/src/app
+      - ./.env:/usr/src/app/.env
+    restart: unless-stopped
