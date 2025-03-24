@@ -13,14 +13,13 @@
   "dependencies": {
     "compression": "^1.8.0",
     "dotenv": "^16.4.7",
-    "express": "^4.21.2"
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0"
   },
   "devDependencies": {
     "@types/compression": "^1.7.5",
     "@types/express": "^5.0.0",
-    "compression": "^1.8.0",
-    "dotenv": "^16.4.7",
-    "express": "^4.21.2",
+    "@types/express-rate-limit": "^6.0.2",
     "typescript": "^5.8.2"
   }
 }

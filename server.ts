@@ -1,6 +1,7 @@
 import express from 'express';
 import compression from 'compression';
 import { config } from 'dotenv';
+import rateLimit from 'express-rate-limit';
 
 config(); // Load environment variables from .env file
 
@@ -12,6 +13,21 @@ const apiUrl = 'https://api.at.govt.nz/realtime/legacy';
 if (!apiKey) {
     throw new Error('API_KEY environment variable is required');
 }
+
+// Rate limit configuration (customize these values in .env if needed)
+const limiter = rateLimit({
+    windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000'), // 1 minute
+    max: parseInt(process.env.RATE_LIMIT_MAX || '20'), // Limit each IP to 20 requests per window
+    standardHeaders: true, // Return rate limit info in headers
+    legacyHeaders: false,
+    message: {
+        status: 429,
+        error: 'Too many requests - please try again later'
+    }
+});
+
+// Apply rate limiting to all requests
+app.use(limiter);
 
 // Cached data and timestamp
 let cachedData: any = null;

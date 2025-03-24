@@ -7,6 +7,7 @@ A caching server for Auckland Transport's realtime GTFS data using Express and B
 - Fetches data every 20 seconds from AT API
 - Gzip/Brotli compression
 - CORS enabled
+- Rate limiting protection
 - Docker support
 - Status monitoring endpoint
 
@@ -14,7 +15,8 @@ A caching server for Auckland Transport's realtime GTFS data using Express and B
 
 ### Requirements
 
-- Docker Desktop with Windows Subsystem for Linux
+- Docker Desktop ([Download](https://www.docker.com/products/docker-desktop))
+- Windows: Enable WSL2 for better performance
 
 ### Setup with Docker
 
@@ -23,9 +25,13 @@ A caching server for Auckland Transport's realtime GTFS data using Express and B
 ```env
 API_KEY=your_api_key_here
 PORT=3000
+
+# Optional rate limiting (default: 20 requests/minute per IP)
+# RATE_LIMIT_WINDOW_MS=60000
+# RATE_LIMIT_MAX=20
 ```
 
-2. Start container for a powershell terminal in the repo folder:
+2. Start container from PowerShell in project folder:
 
 ```powershell
 docker compose up --build
@@ -36,7 +42,7 @@ docker compose up --build
 - <http://localhost:3000/api/data>
 - <http://localhost:3000/status>
 
-## Local Development
+## 💻 Local Development
 
 1. Install Bun
 
@@ -46,7 +52,13 @@ docker compose up --build
 bun install
 ```
 
-3. Create `.env` file and start server:
+3. Create `.env` file:
+
+```env
+API_KEY=your_api_key_here
+```
+
+4. Start server:
 
 ```bash
 bun server.ts
@@ -54,9 +66,11 @@ bun server.ts
 
 ## 🌐 Endpoints
 
-- `GET /` - Basic status
-- `GET /api/data` - Cached GTFS data
-- `GET /status` - Server operation metrics
+| Endpoint       | Description                          | Rate Limited |
+|----------------|--------------------------------------|--------------|
+| `GET /`        | Basic server status                  | ✓            |
+| `GET /api/data`| Cached GTFS data                     | ✓            |
+| `GET /status`  | Server metrics and uptime            | ✓            |
 
 ## 🔧 Configuration
 
@@ -64,6 +78,16 @@ Environment variables:
 
 - `API_KEY` (Required) - AT API subscription key
 - `PORT` - Server port (default: 3000)
+- `RATE_LIMIT_WINDOW_MS` - Rate limit window in ms (default: 60000)
+- `RATE_LIMIT_MAX` - Max requests per IP per window (default: 20)
+
+## ⚠️ Rate Limits
+
+Default protection applied to all endpoints:
+
+- 20 requests per minute per IP address
+- Returns HTTP 429 status for exceeded limits
+- Customizable via environment variables
 
 ## 📄 License
 
