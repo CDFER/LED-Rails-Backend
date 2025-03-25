@@ -9,6 +9,9 @@ const app = express();
 const port = process.env.PORT || 3000;
 const apiKey = process.env.API_KEY;
 const apiUrl = 'https://api.at.govt.nz/realtime/legacy';
+const rateLimitWindowMs = parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000', 10); // 1 minute window
+const rateLimitMax = parseInt(process.env.RATE_LIMIT_MAX || '20', 10); // Limit each IP to 20 requests per window
+const fetchInterval = parseInt(process.env.FETCH_INTERVAL_MS || '20000', 10);
 
 if (!apiKey) {
     throw new Error('API_KEY environment variable is required');
@@ -16,8 +19,8 @@ if (!apiKey) {
 
 // Rate limit configuration (customize these values in .env if needed)
 const limiter = rateLimit({
-    windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000'), // 1 minute
-    max: parseInt(process.env.RATE_LIMIT_MAX || '20'), // Limit each IP to 20 requests per window
+    windowMs: rateLimitWindowMs,
+    max: rateLimitMax,
     standardHeaders: true, // Return rate limit info in headers
     legacyHeaders: false,
     message: {
@@ -35,7 +38,10 @@ let lastFetchTime: Date | null = null;
 let isFetching = false;
 
 // Use compression by default
-app.use(compression());
+app.use(compression({
+    threshold: 1024, // Only compress responses > 1KB
+    level: 8 // Compression level
+}));
 
 // Middleware to set CORS headers
 app.use((req, res, next) => {
@@ -72,7 +78,7 @@ async function fetchData() {
 
 // Initial fetch and periodic updates
 fetchData();
-setInterval(fetchData, 20 * 1000);
+setInterval(fetchData, fetchInterval);
 
 // Endpoints
 app.get('/api/data', (req, res) => {
@@ -82,13 +88,14 @@ app.get('/api/data', (req, res) => {
             lastFetchTime
         });
     }
-
     res.json(cachedData);
 });
 
 app.get('/status', (req, res) => {
     res.json({
-        status: 'OK',
+        status: cachedData ? 'OK' : 'INITIALIZING',
+        uptime: process.uptime(),
+        fetchInterval,
         lastFetchTime,
         nextFetchIn: lastFetchTime ? 20 - ((Date.now() - lastFetchTime.getTime()) / 1000) : 'N/A'
     });
