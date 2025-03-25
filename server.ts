@@ -33,8 +33,8 @@ const limiter = rateLimit({
 app.use(limiter);
 
 // Cached data and timestamp
-let cachedData: any = null;
-let lastFetchTime: Date | null = null;
+let cachedData: any = undefined;
+let lastFetchTime: Date | undefined = undefined;
 let isFetching = false;
 
 // Use compression by default
