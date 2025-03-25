@@ -3,23 +3,25 @@
   "version": "1.0.0",
   "description": "",
   "main": "server.ts",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
   "keywords": [],
   "author": "Chris Dirks",
   "license": "MIT",
   "type": "commonjs",
   "dependencies": {
+    "bun": "^1.2.5",
     "compression": "^1.8.0",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "express-rate-limit": "^7.5.0"
   },
   "devDependencies": {
+    "@eslint/js": "^9.23.0",
     "@types/compression": "^1.7.5",
     "@types/express": "^5.0.0",
     "@types/express-rate-limit": "^6.0.2",
-    "typescript": "^5.8.2"
+    "eslint": "^9.23.0",
+    "globals": "^16.0.0",
+    "typescript": "^5.8.2",
+    "typescript-eslint": "^8.28.0"
   }
 }

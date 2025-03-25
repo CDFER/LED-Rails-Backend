@@ -33,7 +33,7 @@ const limiter = rateLimit({
 app.use(limiter);
 
 // Cached data and timestamp
-let cachedData: any = undefined;
+let cachedGTFSData: string | undefined = undefined;
 let lastFetchTime: Date | undefined = undefined;
 let isFetching = false;
 
@@ -44,7 +44,7 @@ app.use(compression({
 }));
 
 // Middleware to set CORS headers
-app.use((req, res, next) => {
+app.use((_req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
     res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
     next();
@@ -65,8 +65,8 @@ async function fetchData() {
 
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
 
-        const data = await response.json();
-        cachedData = data;
+        const data = (await response.json()) as string;
+        cachedGTFSData = data;
         lastFetchTime = new Date();
         console.log(`Data fetched at ${lastFetchTime.toISOString()}`);
     } catch (error) {
@@ -81,19 +81,19 @@ fetchData();
 setInterval(fetchData, fetchInterval);
 
 // Endpoints
-app.get('/api/data', (req, res) => {
-    if (!cachedData) {
+app.get('/api/data', (_req, res) => {
+    if (!cachedGTFSData) {
         res.status(503).json({
             error: 'Data not yet available',
             lastFetchTime
         });
     }
-    res.json(cachedData);
+    res.json(cachedGTFSData);
 });
 
-app.get('/status', (req, res) => {
+app.get('/status', (_req, res) => {
     res.json({
-        status: cachedData ? 'OK' : 'INITIALIZING',
+        status: cachedGTFSData ? 'OK' : 'INITIALIZING',
         uptime: process.uptime(),
         fetchInterval,
         lastFetchTime,
@@ -101,7 +101,7 @@ app.get('/status', (req, res) => {
     });
 });
 
-app.get('/', (req, res) => {
+app.get('/', (_req, res) => {
     res.send('GTFS-Realtime-Cache-Server is running');
 });
 
