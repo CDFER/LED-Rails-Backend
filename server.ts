@@ -3,6 +3,8 @@ import compression from 'compression';
 import { config } from 'dotenv';
 import rateLimit from 'express-rate-limit';
 
+import type { GTFSRealtime, Entity } from 'gtfs-types';
+
 config(); // Load environment variables from .env file
 
 const app = express();
@@ -33,14 +35,14 @@ const limiter = rateLimit({
 app.use(limiter);
 
 // Cached data and timestamp
-let cachedGTFSData: string | undefined = undefined;
+let cachedGTFSData: GTFSRealtime | undefined = undefined;
 let lastFetchTime: Date | undefined = undefined;
 let isFetching = false;
 
 // Use compression by default
 app.use(compression({
     threshold: 1024, // Only compress responses > 1KB
-    level: 8 // Compression level
+    level: 9 // Compression level
 }));
 
 // Middleware to set CORS headers
@@ -49,6 +51,23 @@ app.use((_req, res, next) => {
     res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
     next();
 });
+
+function logEntityCounts(entities: Entity[]) {
+    let tripUpdates = 0;
+    let vehiclePositions = 0;
+    let alerts = 0;
+
+    entities.forEach(entity => {
+        if (entity.trip_update) tripUpdates++;
+        if (entity.vehicle) vehiclePositions++;
+        if (entity.alert) alerts++;
+    });
+
+    console.log(`GTFS Realtime Stats:
+    - Trip Updates: ${tripUpdates}
+    - Vehicle Positions: ${vehiclePositions}
+    - Alerts: ${alerts}`);
+}
 
 // Fetch data from API
 async function fetchData() {
@@ -65,12 +84,17 @@ async function fetchData() {
 
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
 
-        const data = (await response.json()) as string;
+        const data = (await response.json()) as GTFSRealtime;
         cachedGTFSData = data;
+
+        if (data.response.entity) {
+            logEntityCounts(data.response.entity);
+        }
+
         lastFetchTime = new Date();
         console.log(`Data fetched at ${lastFetchTime.toISOString()}`);
     } catch (error) {
-        console.error('Error fetching data:', error);
+        console.error(`Error fetching data: ${error}`);
     } finally {
         isFetching = false;
     }

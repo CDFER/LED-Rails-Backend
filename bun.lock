@@ -9,6 +9,7 @@
         "dotenv": "^16.4.7",
         "express": "^4.21.2",
         "express-rate-limit": "^7.5.0",
+        "gtfs-types": "^5.0.0",
       },
       "devDependencies": {
         "@eslint/js": "^9.23.0",
@@ -264,6 +265,8 @@
     "gopd": ["gopd@1.2.0", "", {}, "sha512-ZUKRh6/kUFoAiTAtTYPZJ3hw9wNxx+BIBOijnlG9PnrJsCcSjs1wyyD6vJpaYtgnzDrKYRSqf3OO6Rfa93xsRg=="],
 
     "graphemer": ["graphemer@1.4.0", "", {}, "sha512-EtKwoO6kxCL9WO5xipiHTZlSzBm7WLT627TqC/uVRd0HKmq8NXyebnNYxDoBi7wt8eTWrUrKXCOVaFq9x1kgag=="],
+
+    "gtfs-types": ["gtfs-types@5.0.0", "", {}, "sha512-BzHDrSBxrB+zNvtIJVNJNcNqoHFEVEX39bgniLHexH9tT+zWyFXVucHmMUZv+0umrexcbxw+klZTXTvIksKNcw=="],
 
     "has-flag": ["has-flag@4.0.0", "", {}, "sha512-EykJT/Q1KjTWctppgIAgfSO0tKVuZUjhgMr17kqTumMl6Afv3EISleU7qZUzoXDFTAHTDC4NOoG/ZxU3EvlMPQ=="],
 

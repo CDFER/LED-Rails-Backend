@@ -12,7 +12,8 @@
     "compression": "^1.8.0",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
-    "express-rate-limit": "^7.5.0"
+    "express-rate-limit": "^7.5.0",
+    "gtfs-types": "^5.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.23.0",
