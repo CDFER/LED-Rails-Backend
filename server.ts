@@ -111,6 +111,7 @@ app.get('/api/data', (_req, res) => {
             error: 'Data not yet available',
             lastFetchTime
         });
+        return;
     }
     res.json(cachedGTFSData);
 });
