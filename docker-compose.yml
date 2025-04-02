@@ -8,5 +8,6 @@ services:
       - NODE_ENV=production
     volumes:
       - .:/usr/src/app
+      - .:/usr/src/cache
       - ./.env:/usr/src/app/.env
     restart: unless-stopped
