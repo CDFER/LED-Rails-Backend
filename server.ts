@@ -2,6 +2,8 @@ import express from 'express';
 import compression from 'compression';
 import { config } from 'dotenv';
 import rateLimit from 'express-rate-limit';
+import { promises as fs } from 'fs';
+import path from 'path';
 
 import type { GTFSRealtime, Entity } from 'gtfs-types';
 
@@ -14,6 +16,11 @@ const realtimeApiUrl = 'https://api.at.govt.nz/realtime/legacy';
 const rateLimiterWindowMs = parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000', 10);
 const rateLimiterMaxRequests = parseInt(process.env.RATE_LIMIT_MAX || '20', 10);
 const fetchIntervalMs = parseInt(process.env.FETCH_INTERVAL_MS || '20000', 10);
+const saveIntervalMs = parseInt(process.env.SAVE_INTERVAL_MS || '30000', 10);
+
+// File system paths
+const CACHE_DIR = path.join(__dirname, 'cache');
+const CACHE_FILE = path.join(CACHE_DIR, 'realtime_cache.json');
 
 if (!subscriptionKey) {
     throw new Error('API_KEY environment variable is required');
@@ -37,6 +44,70 @@ let cachedRealtimeData: GTFSRealtime | undefined;
 let lastSuccessfulFetchTimestamp: Date | undefined;
 let isFetchInProgress = false;
 const activeVehiclePositions = new Map<string, Entity>();
+
+// Initialize cache directory
+async function initCacheDir() {
+    try {
+        await fs.mkdir(CACHE_DIR, { recursive: true });
+    } catch (error) {
+        console.error('Could not create cache directory:', error);
+    }
+}
+
+// Save cache to disk
+async function persistCache() {
+    if (!cachedRealtimeData) return;
+
+    try {
+        const cacheData = {
+            ...cachedRealtimeData,
+            _metadata: {
+                savedAt: new Date().toISOString(),
+                vehicleCount: activeVehiclePositions.size
+            }
+        };
+
+        await fs.writeFile(CACHE_FILE, JSON.stringify(cacheData));
+        console.log(`Cache persisted at ${new Date().toLocaleTimeString()}`);
+    } catch (error) {
+        console.error('Failed to persist cache:', error);
+    }
+}
+
+// Load cache from disk
+async function restoreCache() {
+    try {
+        const data = await fs.readFile(CACHE_FILE, 'utf-8');
+        const parsed = JSON.parse(data) as GTFSRealtime & {
+            _metadata?: {
+                savedAt: string;
+                vehicleCount: number
+            }
+        };
+
+        // Restore main data
+        cachedRealtimeData = parsed;
+
+        // Restore vehicle positions
+        if (parsed.response?.entity) {
+            parsed.response.entity.forEach(entity => {
+                if (entity.vehicle && entity.id) {
+                    activeVehiclePositions.set(entity.id, entity);
+                }
+            });
+        }
+
+        // Restore timestamp if available
+        if (parsed._metadata?.savedAt) {
+            lastSuccessfulFetchTimestamp = new Date(parsed._metadata.savedAt);
+        }
+
+        console.log(`Restored cache with ${activeVehiclePositions.size} vehicles`);
+    } catch (error) {
+        console.log('No previous cache found or error restoring:', error instanceof Error ? error.message : String(error));
+
+    }
+}
 
 app.use(compression({
     threshold: 1024,
@@ -119,8 +190,27 @@ async function refreshRealtimeData() {
     }
 }
 
-refreshRealtimeData();
-setInterval(refreshRealtimeData, fetchIntervalMs);
+// Modified startup sequence
+async function initializeServer() {
+    await initCacheDir();
+    await restoreCache();
+
+    // Initial data fetch
+    await refreshRealtimeData();
+
+    // Setup intervals
+    setInterval(refreshRealtimeData, fetchIntervalMs);
+    setInterval(persistCache, saveIntervalMs);
+
+    app.listen(port, () => {
+        console.log(`Server operational on port ${port}`);
+    });
+}
+
+initializeServer().catch(error => {
+    console.error('Server initialization failed:', error);
+    process.exit(1);
+});
 
 app.get('/api/data', (_req, res) => {
     if (!cachedRealtimeData) {
@@ -150,8 +240,4 @@ app.get('/status', (_req, res) => {
 
 app.get('/', (_req, res) => {
     res.send('GTFS-Realtime-Cache-Server is running');
-});
-
-app.listen(port, () => {
-    console.log(`Server running on port ${port}`);
 });
