@@ -17,6 +17,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.23.0",
+    "@types/bun": "1.2.5",
     "@types/compression": "^1.7.5",
     "@types/express": "^5.0.1",
     "@types/express-rate-limit": "^6.0.2",

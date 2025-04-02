@@ -15,12 +15,12 @@ const subscriptionKey = process.env.API_KEY;
 const realtimeApiUrl = 'https://api.at.govt.nz/realtime/legacy';
 const rateLimiterWindowMs = parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000', 10);
 const rateLimiterMaxRequests = parseInt(process.env.RATE_LIMIT_MAX || '20', 10);
-const fetchIntervalMs = parseInt(process.env.FETCH_INTERVAL_MS || '20000', 10);
-const saveIntervalMs = parseInt(process.env.SAVE_INTERVAL_MS || '30000', 10);
+const fetchIntervalMs = parseInt(process.env.FETCH_INTERVAL_S || '20', 10)*1000;
+const saveIntervalMs = parseInt(process.env.SAVE_INTERVAL_S || '180', 10)*1000;
 
 // File system paths
 const CACHE_DIR = path.join(__dirname, 'cache');
-const CACHE_FILE = path.join(CACHE_DIR, 'realtime_cache.json');
+const CACHE_FILE = path.join(CACHE_DIR, 'realtime_cache.json.gz');
 
 if (!subscriptionKey) {
     throw new Error('API_KEY environment variable is required');
@@ -39,9 +39,31 @@ const rateLimiter = rateLimit({
 
 app.use(rateLimiter);
 
+
+function getPrecisionTimestamp(): string {
+    const d = new Date();
+    return [
+        d.getHours().toString().padStart(2, '0'),
+        d.getMinutes().toString().padStart(2, '0'),
+        d.getSeconds().toString().padStart(2, '0') + '.' +
+        d.getMilliseconds().toString().padStart(3, '0')
+    ].join(':');
+}
+
+// Utility function for consistent log formatting
+function log(label: string, message: string, extra?: Record<string, unknown>) {
+    const parts = [
+        `[${getPrecisionTimestamp()}]`,
+        `[${label}]`.padEnd(8),
+        message,
+        ...Object.entries(extra || {}).map(([k, v]) => `${k}=${v}`)
+    ];
+    console.log(parts.join(' | '));
+}
+
 // Cache state management
 let cachedRealtimeData: GTFSRealtime | undefined;
-let lastSuccessfulFetchTimestamp: Date | undefined;
+let lastSuccessfulFetchTimestamp: number | undefined;
 let isFetchInProgress = false;
 const activeVehiclePositions = new Map<string, Entity>();
 
@@ -55,35 +77,46 @@ async function initCacheDir() {
 }
 
 // Save cache to disk
-async function persistCache() {
+async function saveCache() {
     if (!cachedRealtimeData) return;
 
     try {
+        const startTime = Date.now();
         const cacheData = {
-            ...cachedRealtimeData,
-            _metadata: {
-                savedAt: new Date().toISOString(),
-                vehicleCount: activeVehiclePositions.size
-            }
+            ...cachedRealtimeData
         };
 
-        await fs.writeFile(CACHE_FILE, JSON.stringify(cacheData));
-        console.log(`Cache persisted at ${new Date().toLocaleTimeString()}`);
+        const jsonPayload = JSON.stringify(cacheData);
+        const jsonSize = Buffer.byteLength(jsonPayload);  // Get byte length
+
+        const entityStats = processEntityStatistics(cacheData.response.entity ?? []);
+
+        // Compress with Bun's native GZIP
+        const compressedData = Bun.gzipSync(jsonPayload, {
+            level: 9,       // Highest compression level (0-9)
+            memLevel: 9,    // Max memory usage for best compression
+            strategy: 2,    // Z_RLE strategy for repetitive binary data
+            windowBits: 31  // Max size of the history buffer
+        });
+
+        await fs.writeFile(CACHE_FILE, compressedData);
+        log("CACHE", `Saved ${path.basename(CACHE_FILE)}`, {
+            vehicles: entityStats.vehiclePositions,
+            size: `${(compressedData.byteLength / 1024).toFixed(1)}KiB`,
+            ratio: `${((compressedData.byteLength / jsonSize) * 100).toFixed(2)}%`,
+            in: `${Date.now() - startTime}ms`
+        });
     } catch (error) {
-        console.error('Failed to persist cache:', error);
+        console.error('Failed to persist compressed cache:', error);
     }
 }
 
-// Load cache from disk
 async function restoreCache() {
+    const startTime = Date.now();
     try {
-        const data = await fs.readFile(CACHE_FILE, 'utf-8');
-        const parsed = JSON.parse(data) as GTFSRealtime & {
-            _metadata?: {
-                savedAt: string;
-                vehicleCount: number
-            }
-        };
+        const compressedData = await fs.readFile(CACHE_FILE);
+        const decompressed = Bun.gunzipSync(compressedData);
+        const parsed = JSON.parse(Buffer.from(decompressed).toString('utf8')) as GTFSRealtime;
 
         // Restore main data
         cachedRealtimeData = parsed;
@@ -97,12 +130,12 @@ async function restoreCache() {
             });
         }
 
-        // Restore timestamp if available
-        if (parsed._metadata?.savedAt) {
-            lastSuccessfulFetchTimestamp = new Date(parsed._metadata.savedAt);
-        }
-
-        console.log(`Restored cache with ${activeVehiclePositions.size} vehicles`);
+        const msPerDay = 1000 * 60 * 60 * 24;
+        log("CACHE", `Restored ${path.basename(CACHE_FILE)}`, {
+            vehicles: activeVehiclePositions.size,
+            writeRate: `~${((compressedData.byteLength * (msPerDay / saveIntervalMs)) / (1024 ** 2)).toFixed(0)}MiB/Day`,
+            in: `${Date.now() - startTime}ms`
+        });
     } catch (error) {
         console.log('No previous cache found or error restoring:', error instanceof Error ? error.message : String(error));
 
@@ -120,21 +153,18 @@ app.use((_req, res, next) => {
     next();
 });
 
-function logEntityStatistics(entities: Entity[]) {
-    const statistics = entities.reduce((acc, entity) => {
+function processEntityStatistics(entities: Entity[]) {
+    return entities.reduce((acc, entity) => {
         if (entity.trip_update) acc.tripUpdates++;
         if (entity.vehicle) acc.vehiclePositions++;
         if (entity.alert) acc.alerts++;
         return acc;
     }, { tripUpdates: 0, vehiclePositions: 0, alerts: 0 });
-
-    console.log(`Realtime Data Statistics:
-    - Trip Updates: ${statistics.tripUpdates}
-    - Vehicle Positions: ${statistics.vehiclePositions}
-    - Alerts: ${statistics.alerts}`);
 }
 
 async function refreshRealtimeData() {
+    const startTime = Date.now();
+
     if (isFetchInProgress) return;
     isFetchInProgress = true;
 
@@ -142,7 +172,8 @@ async function refreshRealtimeData() {
         const response = await fetch(realtimeApiUrl, {
             headers: {
                 'Ocp-Apim-Subscription-Key': subscriptionKey as string,
-                'Accept': 'application/json'
+                'Accept': 'application/json',
+                'Accept-Encoding': 'gzip, deflate, br'
             }
         });
 
@@ -176,13 +207,37 @@ async function refreshRealtimeData() {
                 }
             };
 
-            logEntityStatistics(cachedRealtimeData.response.entity ?? []);
+            const entityStats = processEntityStatistics(freshData.response.entity ?? []);
+
+            log("FETCH", `Realtime data`, {
+                trips: entityStats.tripUpdates,
+                vehicles: entityStats.vehiclePositions,
+                alerts: entityStats.alerts,
+                Mem: `${(process.memoryUsage().rss / (1024 ** 2)).toFixed(0)}MiB`,
+                encoding: `.${response.headers.get('Content-Encoding')}`,
+                in: `${Date.now() - startTime}ms`
+            });
+
+            const fastestEntity = cachedRealtimeData?.response?.entity?.reduce((fastest, current) => {
+                const currSpeed = current.vehicle?.position?.speed || 0;
+                const fastSpeed = fastest?.vehicle?.position?.speed || 0;
+                return currSpeed > fastSpeed && current.id.startsWith('59') ? current : fastest;
+            });
+
+            if (fastestEntity?.vehicle?.position?.speed) {
+                log("FASTEST", `${fastestEntity.vehicle.vehicle?.label?.replace(/\s+/g, '')}` +
+                    ` ${fastestEntity.vehicle.trip?.route_id?.split("-")[0]}` +
+                    ` ${fastestEntity.vehicle.trip?.direction_id ? 'DOWN' : 'UP'}`, { //UP is toward Britomart
+                    v: `${(fastestEntity.vehicle.position.speed * 3.6).toFixed(1)}km/h 🚀`,
+                    link: `https://maps.google.com/?q=${fastestEntity.vehicle.position.latitude.toFixed(6)},${fastestEntity.vehicle.position.longitude.toFixed(6)}`
+                });
+            }
+
         } else {
             cachedRealtimeData = freshData;
         }
 
-        lastSuccessfulFetchTimestamp = new Date();
-        console.log(`Data refreshed at ${lastSuccessfulFetchTimestamp.toISOString()}`);
+        lastSuccessfulFetchTimestamp = Date.now();
     } catch (error) {
         console.error(`Data refresh failed: ${error}`);
     } finally {
@@ -190,20 +245,32 @@ async function refreshRealtimeData() {
     }
 }
 
-// Modified startup sequence
+// Startup sequence
 async function initializeServer() {
+
+    log("SYSTEM", `ENV=${process.env.NODE_ENV || 'development'}`, {
+        Bun: `${Bun.version} [${Bun.revision.slice(0, 7)}]`,
+        PID: `${process.pid}`,
+        Platform: `${process.platform}/${process.arch}`,
+        Mem: `${(process.memoryUsage().rss / (1024 * 1024)).toFixed(0)}MiB`,
+    });
+
     await initCacheDir();
     await restoreCache();
 
     // Initial data fetch
     await refreshRealtimeData();
+    await saveCache();
 
     // Setup intervals
     setInterval(refreshRealtimeData, fetchIntervalMs);
-    setInterval(persistCache, saveIntervalMs);
+    setInterval(saveCache, saveIntervalMs);
 
     app.listen(port, () => {
-        console.log(`Server operational on port ${port}`);
+        log("SERVER", `Listening on`, {
+            port,
+            uptime: `${process.uptime().toFixed(1)}s`
+        });
     });
 }
 
@@ -232,7 +299,7 @@ app.get('/status', (_req, res) => {
         trackedVehicles: activeVehiclePositions.size,
         nextRefreshIn: lastSuccessfulFetchTimestamp
             ? Math.max(0, Math.round(
-                (fetchIntervalMs - (Date.now() - lastSuccessfulFetchTimestamp.getTime())) / 1000
+                (fetchIntervalMs - (Date.now() - lastSuccessfulFetchTimestamp)) / 1000
             )) + 's'
             : 'N/A'
     });
