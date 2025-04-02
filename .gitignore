@@ -25,3 +25,6 @@ Thumbs.db
 
 # Docker
 docker-compose.override.yml
+
+# Vehicle cache folder
+cache
