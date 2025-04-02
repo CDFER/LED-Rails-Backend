@@ -9,7 +9,7 @@ config(); // Load environment variables from .env file
 
 const app = express();
 const port = process.env.PORT || 3000;
-const subscriptionKey = process.env.API_KEY; // Matches API header name
+const subscriptionKey = process.env.API_KEY;
 const realtimeApiUrl = 'https://api.at.govt.nz/realtime/legacy';
 const rateLimiterWindowMs = parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000', 10);
 const rateLimiterMaxRequests = parseInt(process.env.RATE_LIMIT_MAX || '20', 10);
@@ -32,10 +32,11 @@ const rateLimiter = rateLimit({
 
 app.use(rateLimiter);
 
-// Caching state
-let cachedRealtimeData: GTFSRealtime | undefined = undefined;
-let lastSuccessfulFetchTimestamp: Date | undefined = undefined;
+// Cache state management
+let cachedRealtimeData: GTFSRealtime | undefined;
+let lastSuccessfulFetchTimestamp: Date | undefined;
 let isFetchInProgress = false;
+const activeVehiclePositions = new Map<string, Entity>();
 
 app.use(compression({
     threshold: 1024,
@@ -49,23 +50,20 @@ app.use((_req, res, next) => {
 });
 
 function logEntityStatistics(entities: Entity[]) {
-    let tripUpdateCount = 0;
-    let vehiclePositionCount = 0;
-    let alertCount = 0;
-
-    entities.forEach(entity => {
-        if (entity.trip_update) tripUpdateCount++;
-        if (entity.vehicle) vehiclePositionCount++;
-        if (entity.alert) alertCount++;
-    });
+    const statistics = entities.reduce((acc, entity) => {
+        if (entity.trip_update) acc.tripUpdates++;
+        if (entity.vehicle) acc.vehiclePositions++;
+        if (entity.alert) acc.alerts++;
+        return acc;
+    }, { tripUpdates: 0, vehiclePositions: 0, alerts: 0 });
 
     console.log(`Realtime Data Statistics:
-    - Trip Updates: ${tripUpdateCount}
-    - Vehicle Positions: ${vehiclePositionCount}
-    - Alerts: ${alertCount}`);
+    - Trip Updates: ${statistics.tripUpdates}
+    - Vehicle Positions: ${statistics.vehiclePositions}
+    - Alerts: ${statistics.alerts}`);
 }
 
-async function fetchData() {
+async function refreshRealtimeData() {
     if (isFetchInProgress) return;
     isFetchInProgress = true;
 
@@ -79,30 +77,56 @@ async function fetchData() {
 
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
 
-        const data = (await response.json()) as GTFSRealtime;
-        cachedRealtimeData = data;
+        const freshData = await response.json() as GTFSRealtime;
 
-        if (data.response.entity) {
-            logEntityStatistics(data.response.entity);
+        if (freshData.response.entity) {
+            const transientEntities: Entity[] = [];
+
+            freshData.response.entity.forEach(entity => {
+                if (entity.vehicle) {
+                    if (entity.is_deleted) {
+                        activeVehiclePositions.delete(entity.id);
+                    } else {
+                        activeVehiclePositions.set(entity.id, entity);
+                    }
+                } else {
+                    transientEntities.push(entity);
+                }
+            });
+
+            cachedRealtimeData = {
+                ...freshData,
+                response: {
+                    ...freshData.response,
+                    entity: [
+                        ...transientEntities,
+                        ...Array.from(activeVehiclePositions.values())
+                    ]
+                }
+            };
+
+            logEntityStatistics(cachedRealtimeData.response.entity ?? []);
+        } else {
+            cachedRealtimeData = freshData;
         }
 
         lastSuccessfulFetchTimestamp = new Date();
-        console.log(`Data fetched at ${lastSuccessfulFetchTimestamp.toISOString()}`);
+        console.log(`Data refreshed at ${lastSuccessfulFetchTimestamp.toISOString()}`);
     } catch (error) {
-        console.error(`Error fetching data: ${error}`);
+        console.error(`Data refresh failed: ${error}`);
     } finally {
         isFetchInProgress = false;
     }
 }
 
-fetchData();
-setInterval(fetchData, fetchIntervalMs);
+refreshRealtimeData();
+setInterval(refreshRealtimeData, fetchIntervalMs);
 
 app.get('/api/data', (_req, res) => {
     if (!cachedRealtimeData) {
         res.status(503).json({
-            error: 'Data not yet available',
-            lastSuccessfulFetchTimestamp
+            error: 'Initial data load in progress',
+            lastUpdated: lastSuccessfulFetchTimestamp
         });
         return;
     }
@@ -113,11 +137,13 @@ app.get('/status', (_req, res) => {
     res.json({
         status: cachedRealtimeData ? 'OK' : 'INITIALIZING',
         uptime: process.uptime(),
-        fetchIntervalMs,
-        lastSuccessfulFetchTimestamp,
-        nextFetchInSeconds: lastSuccessfulFetchTimestamp ?
-            Math.round(fetchIntervalMs / 1000 -
-                (Date.now() - lastSuccessfulFetchTimestamp.getTime()) / 1000)
+        refreshInterval: `${fetchIntervalMs}ms`,
+        lastUpdate: lastSuccessfulFetchTimestamp,
+        trackedVehicles: activeVehiclePositions.size,
+        nextRefreshIn: lastSuccessfulFetchTimestamp
+            ? Math.max(0, Math.round(
+                (fetchIntervalMs - (Date.now() - lastSuccessfulFetchTimestamp.getTime())) / 1000
+            )) + 's'
             : 'N/A'
     });
 });
