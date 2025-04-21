@@ -1,34 +1,101 @@
 import express from 'express';
-import compression from 'compression';
-import { config } from 'dotenv';
+import compressionMiddleware from 'compression'; // Renamed to avoid conflict
+import { config as loadEnv } from 'dotenv';
 import rateLimit from 'express-rate-limit';
 import { promises as fs } from 'fs';
 import path from 'path';
 
 import type { GTFSRealtime, Entity } from 'gtfs-types';
 
-config(); // Load environment variables from .env file
+// --- Configuration Loading ---
+loadEnv(); // Load environment variables from .env file
 
-const app = express();
-const port = process.env.PORT || 3000;
-const subscriptionKey = process.env.API_KEY;
-const realtimeApiUrl = 'https://api.at.govt.nz/realtime/legacy';
-const rateLimiterWindowMs = parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000', 10);
-const rateLimiterMaxRequests = parseInt(process.env.RATE_LIMIT_MAX || '20', 10);
-const fetchIntervalMs = parseInt(process.env.FETCH_INTERVAL_S || '20', 10)*1000;
-const saveIntervalMs = parseInt(process.env.SAVE_INTERVAL_S || '180', 10)*1000;
+// Helper for safely parsing environment variables
+function safeParseInt(value: string | undefined, defaultValue: number): number {
+    if (value === undefined) return defaultValue;
+    const parsed = parseInt(value, 10);
+    // Return default if parsing fails (NaN) or if value is negative where not expected
+    return isNaN(parsed) || parsed < 0 ? defaultValue : parsed;
+}
 
-// File system paths
-const CACHE_DIR = path.join(__dirname, 'cache');
-const CACHE_FILE = path.join(CACHE_DIR, 'realtime_cache.json.gz');
+// --- Application Constants & Config ---
+const LOG_LABELS = {
+    SYSTEM: 'SYSTEM',
+    SERVER: 'SERVER',
+    CACHE: 'CACHE',
+    FETCH: 'FETCH',
+    ERROR: 'ERROR',
+};
 
-if (!subscriptionKey) {
+const GZIP_OPTIONS = {
+    level: 9,      // Max compression
+    memLevel: 9,   // Max memory for better compression
+    strategy: 2,   // Z_RLE strategy suitable for repetitive data
+    windowBits: 31 // Use gzip format with max window size
+};
+
+const apiConfig = {
+    url: process.env.GTFS_REALTIME_API_URL || 'https://api.at.govt.nz/realtime/legacy',
+    key: process.env.API_KEY,
+};
+
+const cacheConfig = {
+    dir: path.join(__dirname, 'cache'),
+    file: path.join(__dirname, 'cache', 'realtime_cache.json.gz'), // Simplified path join
+    saveIntervalMs: safeParseInt(process.env.SAVE_INTERVAL_S, 180) * 1000,
+};
+
+const serverConfig = {
+    port: safeParseInt(process.env.PORT, 3000),
+    fetchIntervalMs: safeParseInt(process.env.FETCH_INTERVAL_S, 20) * 1000,
+};
+
+const rateLimitConfig = {
+    windowMs: safeParseInt(process.env.RATE_LIMIT_WINDOW_MS, 60000),
+    maxRequests: safeParseInt(process.env.RATE_LIMIT_MAX, 20),
+};
+
+// --- Critical Config Check ---
+if (!apiConfig.key) {
     throw new Error('API_KEY environment variable is required');
 }
 
+// --- Express App Setup ---
+const app = express();
+
+// --- Utility Functions ---
+function getPrecisionTimestamp(): string {
+    const d = new Date();
+    return [
+        d.getHours().toString().padStart(2, '0'),
+        d.getMinutes().toString().padStart(2, '0'),
+        d.getSeconds().toString().padStart(3, '0') + '.' + // Seconds with milliseconds
+        d.getMilliseconds().toString().padStart(3, '0')
+    ].join(':');
+}
+
+function log(label: string, message: string, extra?: Record<string, unknown>) {
+    const parts = [
+        `[${getPrecisionTimestamp()}]`,
+        `[${label}]`.padEnd(8), // Ensure consistent label padding
+        message,
+        // Safely format extra properties
+        ...Object.entries(extra || {}).map(([k, v]) => `${k}=${v instanceof Date ? v.toISOString() : String(v)}`)
+    ];
+    console.log(parts.join(' | '));
+}
+
+// --- State Management ---
+let cachedRealtimeData: GTFSRealtime | undefined;
+let lastSuccessfulFetchTimestamp: number | undefined;
+let isFetchInProgress = false;
+// Stores the most recent non-deleted vehicle position entity for each vehicle ID
+let activeVehiclePositions = new Map<string, Entity>();
+
+// --- Middleware Setup ---
 const rateLimiter = rateLimit({
-    windowMs: rateLimiterWindowMs,
-    max: rateLimiterMaxRequests,
+    windowMs: rateLimitConfig.windowMs,
+    max: rateLimitConfig.maxRequests,
     standardHeaders: true,
     legacyHeaders: false,
     message: {
@@ -36,275 +103,295 @@ const rateLimiter = rateLimit({
         error: 'Too many requests - please try again later'
     }
 });
-
 app.use(rateLimiter);
 
+app.use(compressionMiddleware({
+    threshold: 1024, // Only compress responses larger than 1KB
+    level: GZIP_OPTIONS.level, // Use consistent compression level
+}));
 
-function getPrecisionTimestamp(): string {
-    const d = new Date();
-    return [
-        d.getHours().toString().padStart(2, '0'),
-        d.getMinutes().toString().padStart(2, '0'),
-        d.getSeconds().toString().padStart(2, '0') + '.' +
-        d.getMilliseconds().toString().padStart(3, '0')
-    ].join(':');
-}
+app.use((_req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*'); // Basic CORS headers
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+    next();
+});
 
-// Utility function for consistent log formatting
-function log(label: string, message: string, extra?: Record<string, unknown>) {
-    const parts = [
-        `[${getPrecisionTimestamp()}]`,
-        `[${label}]`.padEnd(8),
-        message,
-        ...Object.entries(extra || {}).map(([k, v]) => `${k}=${v}`)
-    ];
-    console.log(parts.join(' | '));
-}
-
-// Cache state management
-let cachedRealtimeData: GTFSRealtime | undefined;
-let lastSuccessfulFetchTimestamp: number | undefined;
-let isFetchInProgress = false;
-const activeVehiclePositions = new Map<string, Entity>();
-
-// Initialize cache directory
+// --- Cache Operations ---
 async function initCacheDir() {
     try {
-        await fs.mkdir(CACHE_DIR, { recursive: true });
+        await fs.mkdir(cacheConfig.dir, { recursive: true });
+        log(LOG_LABELS.CACHE, `Cache directory ensured at ${cacheConfig.dir}`);
     } catch (error) {
-        console.error('Could not create cache directory:', error);
+        log(LOG_LABELS.ERROR, `Could not create cache directory: ${cacheConfig.dir}`, { error });
+        // Decide if this is fatal. For now, we continue, but saving might fail.
     }
 }
 
-// Save cache to disk
+// Processes entities from a raw GTFS-RT feed, separating vehicle updates
+// and calculating basic statistics. Updates the activeVehiclePositions map.
+function processIncomingEntities(
+    entities: Entity[] | undefined,
+    currentActiveVehicles: Map<string, Entity>
+): {
+    transient: Entity[],
+    updatedVehicles: Map<string, Entity>,
+    stats: { tripUpdates: number, vehiclePositions: number, alerts: number, deletedVehicles: number }
+} {
+    if (!entities) {
+        return { transient: [], updatedVehicles: currentActiveVehicles, stats: { tripUpdates: 0, vehiclePositions: 0, alerts: 0, deletedVehicles: 0 } };
+    }
+
+    const transientEntities: Entity[] = [];
+    // Clone the map to avoid modifying the original during processing, return the new one
+    const updatedVehicles = new Map<string, Entity>(currentActiveVehicles);
+    const stats = { tripUpdates: 0, vehiclePositions: 0, alerts: 0, deletedVehicles: 0 };
+
+    entities.forEach(entity => {
+        if (entity.vehicle) {
+            stats.vehiclePositions++;
+            if (entity.is_deleted) {
+                stats.deletedVehicles++;
+                updatedVehicles.delete(entity.id); // Remove deleted vehicle
+            } else {
+                updatedVehicles.set(entity.id, entity); // Add or update active vehicle
+            }
+        } else {
+            // Assume non-vehicle entities are transient (trip updates, alerts)
+            transientEntities.push(entity);
+            if (entity.trip_update) stats.tripUpdates++;
+            if (entity.alert) stats.alerts++;
+        }
+    });
+    return { transient: transientEntities, updatedVehicles, stats };
+}
+
+
 async function saveCache() {
-    if (!cachedRealtimeData) return;
+    if (!cachedRealtimeData) {
+        log(LOG_LABELS.CACHE, 'Skipping save, no data in memory.');
+        return;
+    }
 
+    const startTime = Date.now();
     try {
-        const startTime = Date.now();
-        const cacheData = {
-            ...cachedRealtimeData
-        };
+        // Directly use the cached data, no need for intermediate copy
+        const jsonPayload = JSON.stringify(cachedRealtimeData);
+        const jsonSize = Buffer.byteLength(jsonPayload);
 
-        const jsonPayload = JSON.stringify(cacheData);
-        const jsonSize = Buffer.byteLength(jsonPayload);  // Get byte length
+        const compressedData = Bun.gzipSync(Buffer.from(jsonPayload), GZIP_OPTIONS); // Pass Buffer for clarity
 
-        const entityStats = processEntityStatistics(cacheData.response.entity ?? []);
+        await fs.writeFile(cacheConfig.file, compressedData);
 
-        // Compress with Bun's native GZIP
-        const compressedData = Bun.gzipSync(jsonPayload, {
-            level: 9,       // Highest compression level (0-9)
-            memLevel: 9,    // Max memory usage for best compression
-            strategy: 2,    // Z_RLE strategy for repetitive binary data
-            windowBits: 31  // Max size of the history buffer
-        });
+        const msPerDay = 86400000; // 1000 * 60 * 60 * 24
+        const estimatedDailyWrite = (compressedData.byteLength * (msPerDay / cacheConfig.saveIntervalMs)) / (1024 ** 2); // MiB
 
-        await fs.writeFile(CACHE_FILE, compressedData);
-        log("CACHE", `Saved ${path.basename(CACHE_FILE)}`, {
-            vehicles: entityStats.vehiclePositions,
-            size: `${(compressedData.byteLength / 1024).toFixed(1)}KiB`,
-            ratio: `${((compressedData.byteLength / jsonSize) * 100).toFixed(2)}%`,
+        log(LOG_LABELS.CACHE, `Saved ${path.basename(cacheConfig.file)}`, {
+            activeVehicles: activeVehiclePositions.size, // Log current active count
+            size: `${(compressedData.byteLength / 1024).toFixed(1)} KiB`,
+            ratio: `${((compressedData.byteLength / jsonSize) * 100).toFixed(1)}%`,
+            estDailyWrite: `${estimatedDailyWrite.toFixed(1)} MiB/Day`,
             in: `${Date.now() - startTime}ms`
         });
     } catch (error) {
-        console.error('Failed to persist compressed cache:', error);
+        log(LOG_LABELS.ERROR, `Failed to save cache to ${cacheConfig.file}`, { error });
     }
 }
 
 async function restoreCache() {
     const startTime = Date.now();
     try {
-        const compressedData = await fs.readFile(CACHE_FILE);
+        const compressedData = await fs.readFile(cacheConfig.file);
         const decompressed = Bun.gunzipSync(compressedData);
+
+        // Using 'as' assumes the stored data structure matches GTFSRealtime.
+        // Validation could be added here for robustness if schema drift is a concern.
         const parsed = JSON.parse(Buffer.from(decompressed).toString('utf8')) as GTFSRealtime;
 
         // Restore main data
         cachedRealtimeData = parsed;
 
-        // Restore vehicle positions
-        if (parsed.response?.entity) {
-            parsed.response.entity.forEach(entity => {
-                if (entity.vehicle && entity.id) {
-                    activeVehiclePositions.set(entity.id, entity);
-                }
-            });
-        }
+        // Rebuild the active vehicle map from the restored data.
+        // This assumes the saved cache file correctly contains all needed vehicle entities.
+        const { updatedVehicles } = processIncomingEntities(
+            parsed.response?.entity,
+            new Map<string, Entity>() // Start with an empty map
+        );
+        activeVehiclePositions = updatedVehicles; // Assign the rebuilt map
 
-        const msPerDay = 1000 * 60 * 60 * 24;
-        log("CACHE", `Restored ${path.basename(CACHE_FILE)}`, {
+        const msPerDay = 86400000;
+        const estimatedDailyWrite = (compressedData.byteLength * (msPerDay / cacheConfig.saveIntervalMs)) / (1024 ** 2); // MiB
+
+        log(LOG_LABELS.CACHE, `Restored ${path.basename(cacheConfig.file)}`, {
             vehicles: activeVehiclePositions.size,
-            writeRate: `~${((compressedData.byteLength * (msPerDay / saveIntervalMs)) / (1024 ** 2)).toFixed(0)}MiB/Day`,
+            size: `${(compressedData.byteLength / 1024).toFixed(1)} KiB`,
+            estDailyWrite: `${estimatedDailyWrite.toFixed(1)} MiB/Day`,
             in: `${Date.now() - startTime}ms`
         });
-    } catch (error) {
-        console.log('No previous cache found or error restoring:', error instanceof Error ? error.message : String(error));
 
+    } catch (error) {
+        // Log different messages based on error type (file not found vs other errors)
+        if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+            log(LOG_LABELS.CACHE, `No previous cache file found at ${cacheConfig.file}. Starting fresh.`);
+        } else {
+            log(LOG_LABELS.ERROR, `Failed to restore cache from ${cacheConfig.file}`, { message: error instanceof Error ? error.message : String(error) });
+        }
+        // Ensure state is clean if restore fails
+        cachedRealtimeData = undefined;
+        activeVehiclePositions.clear();
     }
 }
 
-app.use(compression({
-    threshold: 1024,
-    level: 9
-}));
 
-app.use((_req, res, next) => {
-    res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
-    next();
-});
-
-function processEntityStatistics(entities: Entity[]) {
-    return entities.reduce((acc, entity) => {
-        if (entity.trip_update) acc.tripUpdates++;
-        if (entity.vehicle) acc.vehiclePositions++;
-        if (entity.alert) acc.alerts++;
-        return acc;
-    }, { tripUpdates: 0, vehiclePositions: 0, alerts: 0 });
-}
-
+// --- Core Data Refresh Logic ---
 async function refreshRealtimeData() {
+    if (isFetchInProgress) {
+        log(LOG_LABELS.FETCH, 'Skipping fetch, previous one still in progress.');
+        return;
+    }
+    isFetchInProgress = true;
     const startTime = Date.now();
 
-    if (isFetchInProgress) return;
-    isFetchInProgress = true;
-
     try {
-        const response = await fetch(realtimeApiUrl, {
+        log(LOG_LABELS.FETCH, `Requesting data from ${apiConfig.url}`);
+        const response = await fetch(apiConfig.url, {
             headers: {
-                'Ocp-Apim-Subscription-Key': subscriptionKey as string,
-                'Accept': 'application/json',
-                'Accept-Encoding': 'gzip, deflate, br'
+                'Ocp-Apim-Subscription-Key': apiConfig.key as string, // Assertion safe due to startup check
+                'Accept': 'application/json', // Prefer JSON if available
+                'Accept-Encoding': 'gzip, deflate, br' // Accept compressed responses
             }
         });
 
-        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-
-        const freshData = await response.json() as GTFSRealtime;
-
-        if (freshData.response.entity) {
-            const transientEntities: Entity[] = [];
-
-            freshData.response.entity.forEach(entity => {
-                if (entity.vehicle) {
-                    if (entity.is_deleted) {
-                        activeVehiclePositions.delete(entity.id);
-                    } else {
-                        activeVehiclePositions.set(entity.id, entity);
-                    }
-                } else {
-                    transientEntities.push(entity);
-                }
-            });
-
-            cachedRealtimeData = {
-                ...freshData,
-                response: {
-                    ...freshData.response,
-                    entity: [
-                        ...transientEntities,
-                        ...Array.from(activeVehiclePositions.values())
-                    ]
-                }
-            };
-
-            const entityStats = processEntityStatistics(freshData.response.entity ?? []);
-
-            log("FETCH", `Realtime data`, {
-                trips: entityStats.tripUpdates,
-                vehicles: entityStats.vehiclePositions,
-                alerts: entityStats.alerts,
-                Mem: `${(process.memoryUsage().rss / (1024 ** 2)).toFixed(0)}MiB`,
-                encoding: `.${response.headers.get('Content-Encoding')}`,
-                in: `${Date.now() - startTime}ms`
-            });
-
-            const fastestEntity = cachedRealtimeData?.response?.entity?.reduce((fastest, current) => {
-                const currSpeed = current.vehicle?.position?.speed || 0;
-                const fastSpeed = fastest?.vehicle?.position?.speed || 0;
-                return currSpeed > fastSpeed && current.id.startsWith('59') ? current : fastest;
-            });
-
-            if (fastestEntity?.vehicle?.position?.speed) {
-                log("FASTEST", `${fastestEntity.vehicle.vehicle?.label?.replace(/\s+/g, '')}` +
-                    ` ${fastestEntity.vehicle.trip?.route_id?.split("-")[0]}` +
-                    ` ${fastestEntity.vehicle.trip?.direction_id ? 'DOWN' : 'UP'}`, { //UP is toward Britomart
-                    v: `${(fastestEntity.vehicle.position.speed * 3.6).toFixed(1)}km/h 🚀`,
-                    link: `https://maps.google.com/?q=${fastestEntity.vehicle.position.latitude.toFixed(6)},${fastestEntity.vehicle.position.longitude.toFixed(6)}`
-                });
-            }
-
-        } else {
-            cachedRealtimeData = freshData;
+        if (!response.ok) {
+            throw new Error(`HTTP error! Status: ${response.status} ${response.statusText}`);
         }
 
-        lastSuccessfulFetchTimestamp = Date.now();
+        // Using 'as' assumes API response matches GTFSRealtime. Validation could be added.
+        const freshData = await response.json() as GTFSRealtime;
+        const responseEncoding = response.headers.get('Content-Encoding') || 'identity';
+
+        // Process the received entities
+        const { transient, updatedVehicles, stats } = processIncomingEntities(
+            freshData.response?.entity,
+            activeVehiclePositions // Pass the current map
+        );
+
+        // Update the global state
+        activeVehiclePositions = updatedVehicles; // Assign the newly processed map
+
+        // Reconstruct the cached data object with transient entities + current active vehicles
+        cachedRealtimeData = {
+            header: freshData.header, // Keep original header
+            response: {
+                ...(freshData.response || {}), // Keep other potential response fields
+                entity: [
+                    ...transient,
+                    ...Array.from(activeVehiclePositions.values()) // Combine
+                ]
+            }
+        };
+
+        lastSuccessfulFetchTimestamp = Date.now(); // Update timestamp *after* successful processing
+
+        log(LOG_LABELS.FETCH, `Realtime data processed`, {
+            trips: stats.tripUpdates,
+            vehiclesInFeed: stats.vehiclePositions, // Vehicles in this specific feed
+            activeVehicles: activeVehiclePositions.size, // Total tracked vehicles
+            deletedVehicles: stats.deletedVehicles,
+            alerts: stats.alerts,
+            encoding: responseEncoding,
+            mem: `${(process.memoryUsage().rss / (1024 ** 2)).toFixed(0)} MiB`,
+            in: `${Date.now() - startTime}ms`
+        });
+
     } catch (error) {
-        console.error(`Data refresh failed: ${error}`);
+        log(LOG_LABELS.ERROR, 'Data refresh failed', { message: error instanceof Error ? error.message : String(error) });
+        // Optionally: Implement retry logic or backoff here
     } finally {
         isFetchInProgress = false;
     }
 }
 
-// Startup sequence
+// --- Server Initialization and Routes ---
 async function initializeServer() {
-
-    log("SYSTEM", `ENV=${process.env.NODE_ENV || 'development'}`, {
-        Bun: `${Bun.version} [${Bun.revision.slice(0, 7)}]`,
-        PID: `${process.pid}`,
-        Platform: `${process.platform}/${process.arch}`,
-        Mem: `${(process.memoryUsage().rss / (1024 * 1024)).toFixed(0)}MiB`,
+    log(LOG_LABELS.SYSTEM, `Initializing Server`, {
+        env: process.env.NODE_ENV || 'development',
+        bunVersion: Bun.version,
+        bunRevision: Bun.revision.slice(0, 7),
+        pid: process.pid,
+        platform: `${process.platform}/${process.arch}`,
+        initialMem: `${(process.memoryUsage().rss / (1024 ** 2)).toFixed(0)} MiB`,
     });
 
     await initCacheDir();
-    await restoreCache();
+    await restoreCache(); // Attempt to load previous state
 
-    // Initial data fetch
-    await refreshRealtimeData();
-    await saveCache();
+    log(LOG_LABELS.SYSTEM, 'Performing initial data fetch...');
+    await refreshRealtimeData(); // Fetch initial data before starting server
 
-    // Setup intervals
-    setInterval(refreshRealtimeData, fetchIntervalMs);
-    setInterval(saveCache, saveIntervalMs);
+    // Initial save only if data was successfully fetched
+    if (cachedRealtimeData) {
+        await saveCache();
+    } else {
+        log(LOG_LABELS.CACHE, 'Skipping initial save due to failed initial fetch.');
+    }
 
-    app.listen(port, () => {
-        log("SERVER", `Listening on`, {
-            port,
-            uptime: `${process.uptime().toFixed(1)}s`
+    // Setup periodic tasks
+    log(LOG_LABELS.SYSTEM, `Setting fetch interval to ${serverConfig.fetchIntervalMs}ms`);
+    setInterval(refreshRealtimeData, serverConfig.fetchIntervalMs);
+
+    log(LOG_LABELS.SYSTEM, `Setting cache save interval to ${cacheConfig.saveIntervalMs}ms`);
+    setInterval(saveCache, cacheConfig.saveIntervalMs);
+
+    // --- API Endpoints ---
+    app.get('/api/data', (_req, res) => {
+        if (!cachedRealtimeData || !lastSuccessfulFetchTimestamp) {
+            // Send 503 if data isn't ready yet (either initial load or first fetch failed)
+            res.status(503).json({
+                error: 'Service Unavailable: Data is initializing or first fetch failed.',
+                lastAttempt: lastSuccessfulFetchTimestamp ? new Date(lastSuccessfulFetchTimestamp).toISOString() : null,
+            });
+            return;
+        }
+        // Send the latest successfully processed data
+        res.json(cachedRealtimeData);
+    });
+
+    app.get('/status', (_req, res) => {
+        const now = Date.now();
+        let nextRefreshInSeconds: number | null = null;
+        if (lastSuccessfulFetchTimestamp) {
+            const elapsedSinceLastFetch = now - lastSuccessfulFetchTimestamp;
+            const remainingTime = serverConfig.fetchIntervalMs - elapsedSinceLastFetch;
+            nextRefreshInSeconds = Math.max(0, Math.round(remainingTime / 1000));
+        }
+
+        res.json({
+            status: cachedRealtimeData ? 'OK' : 'INITIALIZING',
+            serverTime: new Date(now).toISOString(),
+            processUptime: process.uptime().toFixed(1) + 's',
+            refreshInterval: `${serverConfig.fetchIntervalMs / 1000}s`,
+            lastUpdateTimestamp: lastSuccessfulFetchTimestamp,
+            lastUpdateHuman: lastSuccessfulFetchTimestamp ? new Date(lastSuccessfulFetchTimestamp).toISOString() : 'N/A',
+            trackedVehicles: activeVehiclePositions.size,
+            fetchInProgress: isFetchInProgress,
+            nextRefreshIn: nextRefreshInSeconds !== null ? `${nextRefreshInSeconds}s` : (isFetchInProgress ? 'pending' : 'N/A'),
+        });
+    });
+
+    app.get('/', (_req, res) => {
+        res.type('text/plain').send('GTFS-Realtime Cache Server is running');
+    });
+
+    // Start listening
+    app.listen(serverConfig.port, () => {
+        log(LOG_LABELS.SERVER, `Listening on port ${serverConfig.port}`, {
+            startupTime: `${process.uptime().toFixed(1)}s`
         });
     });
 }
 
+// --- Start the server ---
 initializeServer().catch(error => {
-    console.error('Server initialization failed:', error);
-    process.exit(1);
-});
-
-app.get('/api/data', (_req, res) => {
-    if (!cachedRealtimeData) {
-        res.status(503).json({
-            error: 'Initial data load in progress',
-            lastUpdated: lastSuccessfulFetchTimestamp
-        });
-        return;
-    }
-    res.json(cachedRealtimeData);
-});
-
-app.get('/status', (_req, res) => {
-    res.json({
-        status: cachedRealtimeData ? 'OK' : 'INITIALIZING',
-        uptime: process.uptime(),
-        refreshInterval: `${fetchIntervalMs}ms`,
-        lastUpdate: lastSuccessfulFetchTimestamp,
-        trackedVehicles: activeVehiclePositions.size,
-        nextRefreshIn: lastSuccessfulFetchTimestamp
-            ? Math.max(0, Math.round(
-                (fetchIntervalMs - (Date.now() - lastSuccessfulFetchTimestamp)) / 1000
-            )) + 's'
-            : 'N/A'
-    });
-});
-
-app.get('/', (_req, res) => {
-    res.send('GTFS-Realtime-Cache-Server is running');
+    log(LOG_LABELS.ERROR, 'Server initialization failed catastrophically', { error });
+    process.exit(1); // Exit if initialization fails critically
 });
