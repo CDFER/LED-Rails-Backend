@@ -342,20 +342,46 @@ async function initializeServer() {
     log(LOG_LABELS.SYSTEM, `Setting cache save interval to ${cacheConfig.saveIntervalMs}ms`);
     setInterval(saveCache, cacheConfig.saveIntervalMs);
 
-    // --- API Endpoints ---
-    app.get('/api/data', (_req, res) => {
+    // --- Helper Function for Data Readiness Check ---
+    const checkDataReady = (res: express.Response): boolean => {
         if (!cachedRealtimeData || !lastSuccessfulFetchTimestamp) {
-            // Send 503 if data isn't ready yet (either initial load or first fetch failed)
             res.status(503).json({
                 error: 'Service Unavailable: Data is initializing or first fetch failed.',
                 lastAttempt: lastSuccessfulFetchTimestamp ? new Date(lastSuccessfulFetchTimestamp).toISOString() : null,
             });
-            return;
+            return false;
         }
+        return true;
+    }
+
+    // --- API Endpoints ---
+
+    // Get all cached data (trip updates, alerts, all vehicle positions)
+    app.get('/api/data', (_req, res) => {
+        if (!checkDataReady(res)) return;
         // Send the latest successfully processed data
         res.json(cachedRealtimeData);
     });
 
+    // Get only the latest position for *all* tracked vehicles
+    app.get('/api/vehicles', (_req, res) => {
+        if (!checkDataReady(res)) return;
+        // activeVehiclePositions stores exactly this data
+        const allVehicles = Array.from(activeVehiclePositions.values());
+        res.json(allVehicles);
+    });
+
+    // Get only the latest position for *train* vehicles (ID starts with '59')
+    app.get('/api/vehicles/trains', (_req, res) => {
+        if (!checkDataReady(res)) return;
+        const trainEntities = Array.from(activeVehiclePositions.values()).filter(entity =>
+            // Check if vehicle.id exists and starts with '59'
+            entity.vehicle?.vehicle?.id?.startsWith('59') ?? false
+        );
+        res.json(trainEntities);
+    });
+
+    // Get server status
     app.get('/status', (_req, res) => {
         const now = Date.now();
         let nextRefreshInSeconds: number | null = null;
@@ -365,6 +391,9 @@ async function initializeServer() {
             nextRefreshInSeconds = Math.max(0, Math.round(remainingTime / 1000));
         }
 
+        // Include counts for different vehicle types in status
+        const trainCount = Array.from(activeVehiclePositions.values()).filter(e => e.vehicle?.vehicle?.id?.startsWith('59') ?? false).length;
+
         res.json({
             status: cachedRealtimeData ? 'OK' : 'INITIALIZING',
             serverTime: new Date(now).toISOString(),
@@ -372,12 +401,14 @@ async function initializeServer() {
             refreshInterval: `${serverConfig.fetchIntervalMs / 1000}s`,
             lastUpdateTimestamp: lastSuccessfulFetchTimestamp,
             lastUpdateHuman: lastSuccessfulFetchTimestamp ? new Date(lastSuccessfulFetchTimestamp).toISOString() : 'N/A',
-            trackedVehicles: activeVehiclePositions.size,
+            trackedVehiclesTotal: activeVehiclePositions.size,
+            trackedVehiclesTrains: trainCount,
             fetchInProgress: isFetchInProgress,
             nextRefreshIn: nextRefreshInSeconds !== null ? `${nextRefreshInSeconds}s` : (isFetchInProgress ? 'pending' : 'N/A'),
         });
     });
 
+    // Root path
     app.get('/', (_req, res) => {
         res.type('text/plain').send('GTFS-Realtime Cache Server is running');
     });

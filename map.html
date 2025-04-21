@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GTFS Vehicle Map</title>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <style>
+        html,
+        body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            font-family: sans-serif;
+        }
+
+        #map {
+            height: 100%;
+            width: 100%;
+        }
+
+        .status-overlay {
+            position: absolute;
+            top: 10px;
+            left: 50px;
+            /* Leaflet controls default to top-right */
+            z-index: 1000;
+            /* Above map tiles */
+            background: rgba(255, 255, 255, 0.8);
+            padding: 5px 10px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+            font-size: 0.9em;
+        }
+
+        .vehicle-marker {
+            background-color: #3388ff;
+            /* Default blue color */
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            border-radius: 50%;
+            width: 10px;
+            height: 10px;
+            text-align: center;
+            line-height: 20px;
+        }
+
+        .vehicle-marker.stale {
+            background-color: #808080;
+            /* Grey color for stale markers */
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="map"></div>
+    <div id="status" class="status-overlay">Loading map...</div>
+
+    <!-- Leaflet JavaScript -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+    <script>
+        // --- Configuration ---
+        // const API_ENDPOINT = '/api/vehicles'; // Assuming server is on the same host/port
+        // Alternative: const API_ENDPOINT = 'http://localhost:3000/api/vehicles';
+        const API_ENDPOINT = 'http://localhost:3000/api/vehicles';
+        const REFRESH_INTERVAL_MS = 20 * 1000; // Refresh every 20 seconds
+        const INITIAL_MAP_CENTER = [-36.8485, 174.7633]; // Auckland CBD approx. coordinates
+        const INITIAL_ZOOM_LEVEL = 12;
+        const STATUS_ELEMENT = document.getElementById('status');
+
+        // --- Relative Time Formatter ---
+        function getRelativeTime(timestamp) {
+            const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });
+            const diff = Date.now() - timestamp;
+            const units = [
+                { unit: 'year', ms: 365 * 24 * 60 * 60 * 1000 },
+                { unit: 'month', ms: 28 * 24 * 60 * 60 * 1000 },
+                { unit: 'week', ms: 7 * 24 * 60 * 60 * 1000 },
+                { unit: 'day', ms: 24 * 60 * 60 * 1000 },
+                { unit: 'hour', ms: 60 * 60 * 1000 },
+                { unit: 'minute', ms: 60 * 1000 },
+                { unit: 'second', ms: 1000 },
+            ];
+            for (const { unit, ms } of units) {
+                if (Math.abs(diff) >= ms || unit === 'second') {
+                    const value = Math.floor(diff / ms);
+                    return rtf.format(-value, unit);
+                }
+            }
+        }
+
+        // --- Map Initialization ---
+        const map = L.map('map').setView(INITIAL_MAP_CENTER, INITIAL_ZOOM_LEVEL);
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+        }).addTo(map);
+
+        STATUS_ELEMENT.textContent = 'Map loaded. Fetching vehicles...';
+
+        const activeIcon = L.divIcon({
+            className: 'vehicle-marker',
+        });
+
+        const staleIcon = L.divIcon({
+            className: 'vehicle-marker stale',
+        });
+
+
+        // --- Vehicle Marker Management ---
+        // Use a Map to store markers, mapping vehicleId to Leaflet marker instance
+        let vehicleMarkers = new Map();
+
+        async function fetchAndDisplayVehicles() {
+            STATUS_ELEMENT.textContent = `Fetching ${API_ENDPOINT}...`;
+            try {
+                const response = await fetch(API_ENDPOINT);
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! Status: ${response.status}`);
+                }
+
+                const vehicleEntities = await response.json(); // Expects an array of GTFS Entities
+
+                if (!Array.isArray(vehicleEntities)) {
+                    throw new Error(`API response is not an array.`);
+                }
+
+                STATUS_ELEMENT.textContent = `Processing ${vehicleEntities.length} vehicle entities...`;
+
+                const seenVehicleIds = new Set();
+
+                vehicleEntities.forEach(entity => {
+                    // Safely access nested properties
+                    const vehicleData = entity?.vehicle;
+                    const position = vehicleData?.position;
+                    const vehicleInfo = vehicleData?.vehicle;
+                    const vehicleId = vehicleInfo?.id;
+                    const label = vehicleInfo?.label;
+                    const latitude = position?.latitude;
+                    const longitude = position?.longitude;
+                    const ageInMs = vehicleData.timestamp ? Date.now() - (vehicleData.timestamp * 1000) : Infinity;
+                    const isStale = ageInMs > 60000; // 60 seconds
+
+                    // Only process if we have the essential data
+                    if (vehicleId && typeof latitude === 'number' && typeof longitude === 'number') {
+                        seenVehicleIds.add(vehicleId);
+
+                        const latLng = [latitude, longitude];
+                        const popupContent = `
+                            <b>Label:</b> ${label}<br>
+                            <b>Vehicle ID:</b> ${vehicleId}<br>
+                            <b>Lat:</b> ${latitude.toFixed(5)}<br>
+                            <b>Lon:</b> ${longitude.toFixed(5)}<br>
+                            ${position.bearing ? `<b>Bearing:</b> ${position.bearing}°<br>` : ''}
+                            ${position.speed ? `<b>Speed:</b> ${(position.speed * 3.6).toFixed(1)} km/h<br>` : ''}
+                            ${vehicleData.timestamp ? `<b>Last Update:</b> ${getRelativeTime(vehicleData.timestamp * 1000)}` : ''}
+                        `;
+
+                        if (vehicleMarkers.has(vehicleId)) {
+                            // Update existing marker
+                            const marker = vehicleMarkers.get(vehicleId);
+                            marker.setLatLng(latLng);
+                            marker.getPopup().setContent(popupContent);
+                            marker.setIcon(isStale ? staleIcon : activeIcon); // Add this line
+                        } else {
+                            // Create new marker with appropriate icon
+                            const marker = L.marker(latLng, {
+                                icon: isStale ? staleIcon : activeIcon
+                            });
+                            marker.bindPopup(popupContent);
+                            marker.addTo(map);
+                            vehicleMarkers.set(vehicleId, marker);
+                        }
+                    } else {
+                        // console.warn("Skipping entity due to missing data:", entity);
+                    }
+                });
+
+                // --- Remove markers for vehicles that are no longer in the feed ---
+                let removedCount = 0;
+                vehicleMarkers.forEach((marker, id) => {
+                    if (!seenVehicleIds.has(id)) {
+                        map.removeLayer(marker); // Remove from Leaflet map
+                        vehicleMarkers.delete(id); // Remove from our tracking map
+                        removedCount++;
+                    }
+                });
+
+                STATUS_ELEMENT.textContent = `Updated: ${seenVehicleIds.size} vehicles displayed. ${removedCount > 0 ? `(${removedCount} removed).` : ''} Next update in ${REFRESH_INTERVAL_MS / 1000}s. (${new Date().toLocaleTimeString()})`;
+
+            } catch (error) {
+                console.error('Failed to fetch or display vehicles:', error);
+                STATUS_ELEMENT.textContent = `Error: ${error.message}. Retrying in ${REFRESH_INTERVAL_MS / 1000}s.`;
+            }
+        }
+
+        // --- Initial Fetch and Periodic Refresh ---
+        fetchAndDisplayVehicles(); // Initial load
+        setInterval(fetchAndDisplayVehicles, REFRESH_INTERVAL_MS); // Refresh periodically
+
+    </script>
+
+</body>
+
+</html>
