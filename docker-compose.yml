@@ -7,7 +7,6 @@ services:
     environment:
       - NODE_ENV=production
     volumes:
-      - .:/usr/src/app
-      - .:/usr/src/cache
+      - ./cache:/usr/src/app/cache
       - ./.env:/usr/src/app/.env
     restart: unless-stopped
