@@ -8,6 +8,7 @@
   "license": "MIT",
   "type": "commonjs",
   "dependencies": {
+    "@xmldom/xmldom": "^0.9.8",
     "bun": "^1.2.5",
     "compression": "^1.8.0",
     "dotenv": "^16.4.7",

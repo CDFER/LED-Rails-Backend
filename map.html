@@ -41,8 +41,8 @@
             /* Default blue color */
             border: 2px solid rgba(255, 255, 255, 0.5);
             border-radius: 50%;
-            width: 10px;
-            height: 10px;
+            width: 5px;
+            height: 5px;
             text-align: center;
             line-height: 20px;
         }
@@ -66,12 +66,35 @@
     <script>
         // --- Configuration ---
         // const API_ENDPOINT = '/api/vehicles'; // Assuming server is on the same host/port
-        // Alternative: const API_ENDPOINT = 'http://localhost:3000/api/vehicles';
-        const API_ENDPOINT = 'http://localhost:3000/api/vehicles';
+        // const API_ENDPOINT = 'http://localhost:3000/api/vehicles';
+        const API_ENDPOINT = 'http://localhost:3000/api/vehicles/trains';
         const REFRESH_INTERVAL_MS = 20 * 1000; // Refresh every 20 seconds
-        const INITIAL_MAP_CENTER = [-36.8485, 174.7633]; // Auckland CBD approx. coordinates
+        const INITIAL_MAP_CENTER = [-37.025, 174.760]; // Auckland CBD approx. coordinates
         const INITIAL_ZOOM_LEVEL = 12;
         const STATUS_ELEMENT = document.getElementById('status');
+
+        // --- Track Polygon Storage ---
+        let trackPolygons = []; // Stores all track block polygons
+
+        // --- Point-in-Polygon Check ---
+        function isPointInPolygon(latLng, polyCoords) {
+            const x = latLng.lng;
+            const y = latLng.lat;
+            let inside = false;
+
+            for (let i = 0, j = polyCoords.length - 1; i < polyCoords.length; j = i++) {
+                const xi = polyCoords[i].lng;
+                const yi = polyCoords[i].lat;
+                const xj = polyCoords[j].lng;
+                const yj = polyCoords[j].lat;
+
+                const intersect = ((yi > y) !== (yj > y)) &&
+                    (x < ((xj - xi) * (y - yi)) / (yj - yi) + xi);
+
+                if (intersect) inside = !inside;
+            }
+            return inside;
+        }
 
         // --- Relative Time Formatter ---
         function getRelativeTime(timestamp) {
@@ -96,66 +119,74 @@
 
         // --- Map Initialization ---
         const map = L.map('map').setView(INITIAL_MAP_CENTER, INITIAL_ZOOM_LEVEL);
-
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,
-            attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+            attribution: '&copy; OpenStreetMap'
         }).addTo(map);
 
-        STATUS_ELEMENT.textContent = 'Map loaded. Fetching vehicles...';
+        // --- KML Track Blocks Loading ---
+        fetch('track-blocks.kml')
+            .then(response => response.text())
+            .then(kmlText => {
+                const parser = new DOMParser();
+                const kmlDoc = parser.parseFromString(kmlText, 'text/xml');
+                trackPolygons = []; // Reset existing polygons
 
-        const activeIcon = L.divIcon({
-            className: 'vehicle-marker',
-        });
+                for (const placemark of kmlDoc.getElementsByTagName('Placemark')) {
+                    const name = placemark.getElementsByTagName('name')[0].textContent;
+                    const coordinates = placemark.getElementsByTagName('coordinates')[0].textContent.trim();
+                    const coordsArray = coordinates.split(' ').map(coord => {
+                        const [lon, lat] = coord.split(',').map(Number);
+                        return [lat, lon];
+                    });
 
-        const staleIcon = L.divIcon({
-            className: 'vehicle-marker stale',
-        });
-
+                    const polygon = L.polygon(coordsArray, {
+                        color: 'red',
+                        weight: 2,
+                        fillColor: 'red',
+                        fillOpacity: 0.2
+                    }).addTo(map);
+                    polygon.bindPopup(name);
+                    trackPolygons.push(polygon);
+                }
+            })
+            .catch(error => {
+                console.error('KML Error:', error);
+                STATUS_ELEMENT.textContent += ' Error loading track blocks.';
+            });
 
         // --- Vehicle Marker Management ---
-        // Use a Map to store markers, mapping vehicleId to Leaflet marker instance
+        const activeIcon = L.divIcon({ className: 'vehicle-marker' });
+        const staleIcon = L.divIcon({ className: 'vehicle-marker stale' });
         let vehicleMarkers = new Map();
 
         async function fetchAndDisplayVehicles() {
-            STATUS_ELEMENT.textContent = `Fetching ${API_ENDPOINT}...`;
             try {
                 const response = await fetch(API_ENDPOINT);
-
-                if (!response.ok) {
-                    throw new Error(`HTTP error! Status: ${response.status}`);
-                }
-
-                const vehicleEntities = await response.json(); // Expects an array of GTFS Entities
-
-                if (!Array.isArray(vehicleEntities)) {
-                    throw new Error(`API response is not an array.`);
-                }
-
-                STATUS_ELEMENT.textContent = `Processing ${vehicleEntities.length} vehicle entities...`;
-
+                const vehicleEntities = await response.json();
                 const seenVehicleIds = new Set();
 
+                // Update or create vehicle markers
                 vehicleEntities.forEach(entity => {
-                    // Safely access nested properties
                     const vehicleData = entity?.vehicle;
                     const position = vehicleData?.position;
+                    const vehicleId = vehicleData?.vehicle?.id;
                     const vehicleInfo = vehicleData?.vehicle;
-                    const vehicleId = vehicleInfo?.id;
                     const label = vehicleInfo?.label;
                     const latitude = position?.latitude;
                     const longitude = position?.longitude;
                     const ageInMs = vehicleData.timestamp ? Date.now() - (vehicleData.timestamp * 1000) : Infinity;
                     const isStale = ageInMs > 60000; // 60 seconds
+                    const trip = vehicleData?.trip;
 
-                    // Only process if we have the essential data
-                    if (vehicleId && typeof latitude === 'number' && typeof longitude === 'number') {
+                    if (vehicleId && position?.latitude && position?.longitude) {
                         seenVehicleIds.add(vehicleId);
+                        const latLng = [position.latitude, position.longitude];
 
-                        const latLng = [latitude, longitude];
                         const popupContent = `
                             <b>Label:</b> ${label}<br>
                             <b>Vehicle ID:</b> ${vehicleId}<br>
+                            ${trip?.route_id ? `<b>Route:</b> ${trip.route_id}<br>` : ''}
                             <b>Lat:</b> ${latitude.toFixed(5)}<br>
                             <b>Lon:</b> ${longitude.toFixed(5)}<br>
                             ${position.bearing ? `<b>Bearing:</b> ${position.bearing}°<br>` : ''}
@@ -164,40 +195,49 @@
                         `;
 
                         if (vehicleMarkers.has(vehicleId)) {
-                            // Update existing marker
-                            const marker = vehicleMarkers.get(vehicleId);
-                            marker.setLatLng(latLng);
-                            marker.getPopup().setContent(popupContent);
-                            marker.setIcon(isStale ? staleIcon : activeIcon); // Add this line
+                            vehicleMarkers.get(vehicleId)
+                                .setLatLng(latLng)
+                                .setIcon(isStale
+                                    ? staleIcon
+                                    : activeIcon);
                         } else {
-                            // Create new marker with appropriate icon
-                            const marker = L.marker(latLng, {
-                                icon: isStale ? staleIcon : activeIcon
-                            });
-                            marker.bindPopup(popupContent);
-                            marker.addTo(map);
+                            const marker = L.marker(latLng, { icon: activeIcon })
+                                .bindPopup(popupContent)
+                                .addTo(map);
                             vehicleMarkers.set(vehicleId, marker);
                         }
-                    } else {
-                        // console.warn("Skipping entity due to missing data:", entity);
                     }
                 });
 
-                // --- Remove markers for vehicles that are no longer in the feed ---
-                let removedCount = 0;
+                // Remove old markers
                 vehicleMarkers.forEach((marker, id) => {
                     if (!seenVehicleIds.has(id)) {
-                        map.removeLayer(marker); // Remove from Leaflet map
-                        vehicleMarkers.delete(id); // Remove from our tracking map
-                        removedCount++;
+                        map.removeLayer(marker);
+                        vehicleMarkers.delete(id);
                     }
                 });
 
-                STATUS_ELEMENT.textContent = `Updated: ${seenVehicleIds.size} vehicles displayed. ${removedCount > 0 ? `(${removedCount} removed).` : ''} Next update in ${REFRESH_INTERVAL_MS / 1000}s. (${new Date().toLocaleTimeString()})`;
+                // Update polygon colors based on vehicle positions
+                if (trackPolygons.length > 0) {
+                    const vehiclePositions = Array.from(vehicleMarkers.values())
+                        .map(marker => marker.getLatLng());
 
+                    trackPolygons.forEach(polygon => {
+                        const polyCoords = polygon.getLatLngs()[0];
+                        const hasVehicle = vehiclePositions.some(latLng =>
+                            isPointInPolygon(latLng, polyCoords)
+                        );
+                        polygon.setStyle({
+                            color: hasVehicle ? 'green' : 'red',
+                            fillColor: hasVehicle ? 'green' : 'red'
+                        });
+                    });
+                }
+
+                STATUS_ELEMENT.textContent = `Active vehicles: ${vehicleMarkers.size}`;
             } catch (error) {
-                console.error('Failed to fetch or display vehicles:', error);
-                STATUS_ELEMENT.textContent = `Error: ${error.message}. Retrying in ${REFRESH_INTERVAL_MS / 1000}s.`;
+                console.error('Vehicle Error:', error);
+                STATUS_ELEMENT.textContent = `Error: ${error.message}`;
             }
         }
 
