@@ -111,11 +111,11 @@ let trackBlockDefinitions: TrackBlock[] = [];
 let currentLedMap: LedMap = {
     version: "1.0.0",
     lineColors: {
-        "1": "#010001", // Default "out of service" color
-        "2": "#000100",
-        "3": "#020100",
-        "4": "#000202",
-        "5": "#020000",
+        "1": "#800080", // Default "out of service" color
+        "2": "#004000",
+        "3": "#804000",
+        "4": "#008080",
+        "5": "#ff0000",
     },
     busses: [
         { busId: "STRAND_MNK", leds: {} },
@@ -217,7 +217,7 @@ async function restoreGtfsCache() {
         await fs.mkdir(CACHE_CONFIG.folder, { recursive: true });
     } catch (dirError) {
         log(LOG_LABELS.ERROR, `Could not create cache directory: ${CACHE_CONFIG.folder}`, { errorMessage: dirError instanceof Error ? dirError.message : String(dirError) });
-        // Proceed, as we might still run without cache, but log the failure.
+        // Proceed, as we can run without cache
     }
 
     try {
