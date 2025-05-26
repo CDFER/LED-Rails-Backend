@@ -12,7 +12,7 @@ import {
     updateLedMapWithOccupancy
 } from './trackBlocks';
 
-import type { GTFSRealtime, Entity } from 'gtfs-types';
+import type { FeedMessage, GTFSRealtime, Entity } from 'gtfs-types';
 
 // --- Configuration Loading ---
 loadEnv(); // Load environment variables from .env file
@@ -22,6 +22,11 @@ function safeParseInt(value: string | undefined, defaultValue: number): number {
     if (value === undefined) return defaultValue;
     const parsed = parseInt(value, 10);
     return isNaN(parsed) || parsed < 0 ? defaultValue : parsed;
+}
+
+// Helper to get a consistent error message
+function getErrorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
 }
 
 // --- Application Constants & Config ---
@@ -38,10 +43,11 @@ const LOG_LABELS = {
 
 // GZIP_OPTIONS for Bun.gzipSync
 const BUN_GZIP_OPTIONS = {
-    level: 9 as 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | -1,
-    memLevel: 9 as 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9,
-    // strategy: 2, // Z_RLE - check if Bun supports this strategy identifier
-    // windowBits: 31, // For gzip, this is typically 15. 16+15 might indicate gzip header. Verify with Bun docs.
+    level: 9 as 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | -1, // Compression level (0-9, 9 for max compression)
+    memLevel: 9 as 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9, // Maximum memory usage for compression (9 is max memory)
+    strategy: 2 as 0 | 1 | 2 | 3 | 4, // Z_RLE: Limit match distances to one (run-length encoding)
+    // 25..31 (16+9..15): The output will have a gzip header and footer (gzip)
+    windowBits: 31 as 9 | 10 | 11 | 12 | 13 | 14 | 15 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | -9 | -10 | -11 | -12 | -13 | -14 | -15,
 };
 
 const API_CONFIG = {
@@ -102,7 +108,7 @@ let cachedRealtimeData: GTFSRealtime | undefined;
 let lastSuccessfulFetchTimestamp: number | undefined;
 let isFetchInProgress = false;
 
-let activeVehicleEntities = new Map<string, Entity>();
+let activeVehicleEntities: Entity[] = [];
 let activeTrainEntities: Entity[] = [];
 
 let trackBlockDefinitions: TrackBlock[] = [];
@@ -111,10 +117,10 @@ let trackBlockDefinitions: TrackBlock[] = [];
 let currentLedMap: LedMap = {
     version: "1.0.0",
     lineColors: {
-        "1": "#800080", // Default "out of service" color
-        "2": "#004000",
-        "3": "#804000",
-        "4": "#008080",
+        "1": "#ff00ff", // Default "out of service" color
+        "2": "#00ff00",
+        "3": "#ff8000",
+        "4": "#00ffff",
         "5": "#ff0000",
     },
     busses: [
@@ -150,14 +156,14 @@ app.use((_req, res, next) => {
 // --- Data Processing ---
 interface ProcessedFeed {
     transientEntities: Entity[];
-    updatedVehicleEntities: Map<string, Entity>;
+    updatedVehicleEntities: Entity[];
 }
 
 function processIncomingEntities(
     entities: Entity[] | undefined,
-    currentVehicleEntities: Map<string, Entity>
+    currentVehicleEntities: Entity[]
 ): ProcessedFeed {
-    const newVehicleEntities = new Map<string, Entity>(currentVehicleEntities);
+    const newVehicleEntities: Entity[] = [...currentVehicleEntities];
     const transient: Entity[] = [];
 
     if (!entities) {
@@ -168,10 +174,15 @@ function processIncomingEntities(
         if (entity.trip_update) { // GTFS-RT specific check
             transient.push(entity);
         } else if (entity.vehicle) {
-            if (!entity.is_deleted && entity.vehicle.vehicle?.id) { // Ensure vehicle_id exists
-                newVehicleEntities.set(entity.vehicle.vehicle.id, entity);
-            } else if (entity.is_deleted && entity.vehicle.vehicle?.id) {
-                newVehicleEntities.delete(entity.vehicle.vehicle.id); // Handle deletions
+            if (!entity.is_deleted && entity.vehicle?.vehicle?.id) { // Ensure vehicle_id exists
+                // Replace or add entity by vehicle id
+                const vehicleId = entity.vehicle?.vehicle?.id;
+                const idx = newVehicleEntities.findIndex(e => e.vehicle?.vehicle?.id === vehicleId);
+                if (idx !== -1) {
+                    newVehicleEntities[idx] = entity;
+                } else {
+                    newVehicleEntities.push(entity);
+                }
             }
         } else if (entity.alert) { // GTFS-RT specific check
             transient.push(entity);
@@ -197,17 +208,17 @@ async function saveGtfsCache() {
 
         await fs.writeFile(CACHE_CONFIG.file, compressedData);
 
-        const msPerDay = 86400000;
+        const msPerDay = 1000 * 60 * 60 * 24; // 24 hours in milliseconds
         const estimatedDailyWriteMiB = (compressedData.byteLength * (msPerDay / CACHE_CONFIG.saveIntervalMs)) / (1024 ** 2);
 
         log(LOG_LABELS.CACHE, `Saved ${path.basename(CACHE_CONFIG.file)}`, {
-            activeVehicles: activeVehicleEntities.size,
+            activeVehicles: activeVehicleEntities.length,
             sizeKiB: (compressedData.byteLength / 1024).toFixed(1),
             estDailyWriteMiB: estimatedDailyWriteMiB.toFixed(1),
             durationMs: Date.now() - startTime,
         });
     } catch (error) {
-        log(LOG_LABELS.ERROR, `Failed to save cache to ${CACHE_CONFIG.file}`, { errorMessage: error instanceof Error ? error.message : String(error) });
+        log(LOG_LABELS.ERROR, `Failed to save cache to ${CACHE_CONFIG.file}`, { errorMessage: getErrorMessage(error) });
     }
 }
 
@@ -215,8 +226,8 @@ async function restoreGtfsCache() {
     const startTime = Date.now();
     try {
         await fs.mkdir(CACHE_CONFIG.folder, { recursive: true });
-    } catch (dirError) {
-        log(LOG_LABELS.ERROR, `Could not create cache directory: ${CACHE_CONFIG.folder}`, { errorMessage: dirError instanceof Error ? dirError.message : String(dirError) });
+    } catch (error) {
+        log(LOG_LABELS.ERROR, `Could not create cache directory: ${CACHE_CONFIG.folder}`, { errorMessage: getErrorMessage(error) });
         // Proceed, as we can run without cache
     }
 
@@ -230,7 +241,7 @@ async function restoreGtfsCache() {
         // Rebuild active vehicle map from the restored entities
         const { updatedVehicleEntities } = processIncomingEntities(
             parsedData.response?.entity,
-            new Map<string, Entity>() // Start fresh for rebuilding active vehicles
+            [] // Start fresh for rebuilding active vehicles
         );
         activeVehicleEntities = updatedVehicleEntities;
 
@@ -238,7 +249,7 @@ async function restoreGtfsCache() {
         const estimatedDailyWriteMiB = (compressedData.byteLength * (msPerDay / CACHE_CONFIG.saveIntervalMs)) / (1024 ** 2);
 
         log(LOG_LABELS.CACHE, `Restored ${path.basename(CACHE_CONFIG.file)}`, {
-            restoredVehicles: activeVehicleEntities.size,
+            restoredVehicles: activeVehicleEntities.length,
             sizeKiB: (compressedData.byteLength / 1024).toFixed(1),
             estDailyWriteMiB: estimatedDailyWriteMiB.toFixed(1),
             durationMs: Date.now() - startTime,
@@ -247,10 +258,10 @@ async function restoreGtfsCache() {
         if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
             log(LOG_LABELS.CACHE, `No previous cache file found at ${CACHE_CONFIG.file}. Starting fresh.`);
         } else {
-            log(LOG_LABELS.ERROR, `Failed to restore cache from ${CACHE_CONFIG.file}`, { errorMessage: error instanceof Error ? error.message : String(error) });
+            log(LOG_LABELS.ERROR, `Failed to restore cache from ${CACHE_CONFIG.file}`, { errorMessage: getErrorMessage(error) });
         }
         cachedRealtimeData = undefined; // Ensure clean state if restore fails
-        activeVehicleEntities.clear();
+        activeVehicleEntities = [];
     }
 }
 
@@ -265,6 +276,8 @@ async function refreshRealtimeData() {
 
     try {
         // log(LOG_LABELS.FETCH, `Requesting data from ${API_CONFIG.url}`);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
         const response = await fetch(API_CONFIG.url, {
             headers: {
                 'Ocp-Apim-Subscription-Key': API_CONFIG.key as string,
@@ -272,36 +285,37 @@ async function refreshRealtimeData() {
                 'Accept-Encoding': 'gzip, deflate, br',
             },
             redirect: 'follow', // Handle redirects
-            timeout: 15000, // 15 second timeout for fetch
+            signal: controller.signal,
         });
+        clearTimeout(timeoutId);
 
         const processingStartTime = Date.now();
         if (!response.ok) {
             throw new Error(`HTTP error! Status: ${response.status} ${response.statusText}. URL: ${response.url}`);
         }
 
-        const freshData = await response.json() as GTFSRealtime;
+        const freshData = await response.json() as FeedMessage;
         const responseEncoding = response.headers.get('Content-Encoding') || 'identity';
 
         const { transientEntities, updatedVehicleEntities } = processIncomingEntities(
-            freshData.response?.entity,
-            activeVehicleEntities // Pass current map to update from
+            freshData?.entity,
+            activeVehicleEntities // Pass current array to update from
         );
 
         activeVehicleEntities = updatedVehicleEntities; // Update global state
 
         cachedRealtimeData = {
-            header: freshData.header,
+            status: 'OK',
             response: {
-                ...(freshData.response || {}),
+                header: freshData.header,
                 entity: [
                     ...transientEntities,
-                    ...Array.from(activeVehicleEntities.values()), // Combine for full cache
+                    ...activeVehicleEntities, // Combine for full cache
                 ],
             },
         };
 
-        activeTrainEntities = Array.from(activeVehicleEntities.values()).filter(entity =>
+        activeTrainEntities = activeVehicleEntities.filter(entity =>
             entity.vehicle?.vehicle?.id?.startsWith('59') ?? false
         );
 
@@ -310,7 +324,7 @@ async function refreshRealtimeData() {
         lastSuccessfulFetchTimestamp = Date.now();
 
         log(LOG_LABELS.FETCH, 'GTFS Realtime Data', {
-            vehiclesTracked: activeVehicleEntities.size,
+            vehiclesTracked: activeVehicleEntities.length,
             trainsTracked: activeTrainEntities.length,
             encoding: responseEncoding,
             memoryMiB: (process.memoryUsage().rss / (1024 ** 2)).toFixed(0),
@@ -319,7 +333,7 @@ async function refreshRealtimeData() {
         });
 
     } catch (error) {
-        log(LOG_LABELS.ERROR, 'Data refresh failed.', { errorMessage: error instanceof Error ? error.message : String(error) });
+        log(LOG_LABELS.ERROR, 'Data refresh failed.', { errorMessage: getErrorMessage(error) });
     } finally {
         isFetchInProgress = false;
     }
@@ -345,7 +359,7 @@ async function initializeServer() {
             log(LOG_LABELS.BLOCK, `No track blocks found or loaded from ${TRACK_BLOCKS_CONFIG.file}. LED map functionality might be limited.`);
         }
     } catch (error) {
-        log(LOG_LABELS.ERROR, `Failed to load track blocks from ${TRACK_BLOCKS_CONFIG.file}`, { errorMessage: error instanceof Error ? error.message : String(error) });
+        log(LOG_LABELS.ERROR, `Failed to load track blocks from ${TRACK_BLOCKS_CONFIG.file}`, { errorMessage: getErrorMessage(error) });
     }
 
 
@@ -410,7 +424,7 @@ async function initializeServer() {
             processUptimeSec: process.uptime().toFixed(1),
             refreshIntervalSec: SERVER_CONFIG.fetchIntervalMs / 1000,
             lastSuccessfulUpdateIso: lastSuccessfulFetchTimestamp ? new Date(lastSuccessfulFetchTimestamp).toISOString() : 'N/A',
-            trackedVehiclesTotal: activeVehicleEntities.size,
+            trackedVehiclesTotal: activeVehicleEntities.length,
             trackedTrains: activeTrainEntities.length,
             fetchInProgress: isFetchInProgress,
             nextRefreshInSec: nextRefreshInSec !== null ? nextRefreshInSec : (isFetchInProgress ? 'pending_completion' : 'N/A'),

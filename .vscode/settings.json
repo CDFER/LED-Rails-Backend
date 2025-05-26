@@ -4,7 +4,12 @@
         "Britomart",
         "codepaths",
         "GTFS",
-        "NIMT"
+        "LEDMAP",
+        "Lngs",
+        "NIMT",
+        "Placemark",
+        "placemarks",
+        "trackblock"
     ],
     // The path to the `bun` executable.
     "bun.runtime": "node_modules/bun/bin/bun",

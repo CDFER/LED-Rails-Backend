@@ -88,11 +88,13 @@ export async function loadTrackBlocks(filePath: string): Promise<TrackBlock[]> {
  * @param polygon Array of [lat, lng] tuples defining the polygon vertices.
  * @returns True if the point is inside the polygon, false otherwise.
  */
-function isPointInPolygon(pointLat: number, pointLng: number, polygon: Array<[number, number]>): boolean {
-    let isInside = false;
-    if (polygon.length < 3) { // A polygon needs at least 3 vertices
+function isPointInPolygon(pointLat: number, pointLng: number, polygon: Array<[number, number]> | undefined): boolean {
+    if (!polygon || polygon.length < 3) { // A polygon needs at least 3 vertices
         return false;
     }
+
+    let isInside = false;
+
     for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
         const lat_i = polygon[i][0];
         const lng_i = polygon[i][1];
