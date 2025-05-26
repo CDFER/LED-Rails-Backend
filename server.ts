@@ -12,7 +12,7 @@ import {
     updateLedMapWithOccupancy
 } from './trackBlocks';
 
-import type { FeedMessage, GTFSRealtime, Entity } from 'gtfs-types';
+import type { GTFSRealtime, Entity } from 'gtfs-types';
 
 // --- Configuration Loading ---
 loadEnv(); // Load environment variables from .env file
@@ -104,7 +104,6 @@ function log(label: string, message: string, extra?: Record<string, unknown>) {
 }
 
 // --- State Management ---
-let cachedRealtimeData: GTFSRealtime | undefined;
 let lastSuccessfulFetchTimestamp: number | undefined;
 let isFetchInProgress = false;
 
@@ -196,27 +195,20 @@ function processIncomingEntities(
 
 // --- Cache Operations ---
 async function saveGtfsCache() {
-    if (!cachedRealtimeData) {
-        log(LOG_LABELS.CACHE, 'Skipping save, no data in memory.');
-        return;
-    }
-
     const startTime = Date.now();
     try {
-        const jsonPayload = JSON.stringify(cachedRealtimeData);
+        const jsonPayload = JSON.stringify(activeVehicleEntities);
         const compressedData = Bun.gzipSync(Buffer.from(jsonPayload), BUN_GZIP_OPTIONS);
-
         await fs.writeFile(CACHE_CONFIG.file, compressedData);
-
         const msPerDay = 1000 * 60 * 60 * 24; // 24 hours in milliseconds
         const estimatedDailyWriteMiB = (compressedData.byteLength * (msPerDay / CACHE_CONFIG.saveIntervalMs)) / (1024 ** 2);
-
-        log(LOG_LABELS.CACHE, `Saved ${path.basename(CACHE_CONFIG.file)}`, {
-            activeVehicles: activeVehicleEntities.length,
-            sizeKiB: (compressedData.byteLength / 1024).toFixed(1),
-            estDailyWriteMiB: estimatedDailyWriteMiB.toFixed(1),
-            durationMs: Date.now() - startTime,
-        });
+        log(LOG_LABELS.CACHE, `Saved ${path.basename(CACHE_CONFIG.file)}`,
+            {
+                activeVehicles: activeVehicleEntities.length,
+                sizeKiB: (compressedData.byteLength / 1024).toFixed(1),
+                estDailyWriteMiB: estimatedDailyWriteMiB.toFixed(1),
+                durationMs: Date.now() - startTime,
+            });
     } catch (error) {
         log(LOG_LABELS.ERROR, `Failed to save cache to ${CACHE_CONFIG.file}`, { errorMessage: getErrorMessage(error) });
     }
@@ -230,37 +222,25 @@ async function restoreGtfsCache() {
         log(LOG_LABELS.ERROR, `Could not create cache directory: ${CACHE_CONFIG.folder}`, { errorMessage: getErrorMessage(error) });
         // Proceed, as we can run without cache
     }
-
     try {
         const compressedData = await fs.readFile(CACHE_CONFIG.file);
         const decompressed = Bun.gunzipSync(compressedData);
-        const parsedData = JSON.parse(Buffer.from(decompressed).toString('utf8')) as GTFSRealtime;
-
-        cachedRealtimeData = parsedData;
-
-        // Rebuild active vehicle map from the restored entities
-        const { updatedVehicleEntities } = processIncomingEntities(
-            parsedData.response?.entity,
-            [] // Start fresh for rebuilding active vehicles
-        );
-        activeVehicleEntities = updatedVehicleEntities;
-
-        const msPerDay = 86400000;
+        activeVehicleEntities = JSON.parse(Buffer.from(decompressed).toString('utf8')) as Entity[];
+        const msPerDay = 1000 * 60 * 60 * 24; // 24 hours in milliseconds
         const estimatedDailyWriteMiB = (compressedData.byteLength * (msPerDay / CACHE_CONFIG.saveIntervalMs)) / (1024 ** 2);
-
-        log(LOG_LABELS.CACHE, `Restored ${path.basename(CACHE_CONFIG.file)}`, {
-            restoredVehicles: activeVehicleEntities.length,
-            sizeKiB: (compressedData.byteLength / 1024).toFixed(1),
-            estDailyWriteMiB: estimatedDailyWriteMiB.toFixed(1),
-            durationMs: Date.now() - startTime,
-        });
+        log(LOG_LABELS.CACHE, `Restored ${path.basename(CACHE_CONFIG.file)}`,
+            {
+                restoredVehicles: activeVehicleEntities.length,
+                sizeKiB: (compressedData.byteLength / 1024).toFixed(1),
+                estDailyWriteMiB: estimatedDailyWriteMiB.toFixed(1),
+                durationMs: Date.now() - startTime,
+            });
     } catch (error) {
         if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
             log(LOG_LABELS.CACHE, `No previous cache file found at ${CACHE_CONFIG.file}. Starting fresh.`);
         } else {
             log(LOG_LABELS.ERROR, `Failed to restore cache from ${CACHE_CONFIG.file}`, { errorMessage: getErrorMessage(error) });
         }
-        cachedRealtimeData = undefined; // Ensure clean state if restore fails
         activeVehicleEntities = [];
     }
 }
@@ -275,7 +255,6 @@ async function refreshRealtimeData() {
     const requestStartTime = Date.now();
 
     try {
-        // log(LOG_LABELS.FETCH, `Requesting data from ${API_CONFIG.url}`);
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
         const response = await fetch(API_CONFIG.url, {
@@ -294,26 +273,14 @@ async function refreshRealtimeData() {
             throw new Error(`HTTP error! Status: ${response.status} ${response.statusText}. URL: ${response.url}`);
         }
 
-        const freshData = await response.json() as FeedMessage;
+        const freshData = await response.json() as GTFSRealtime;
         const responseEncoding = response.headers.get('Content-Encoding') || 'identity';
-
-        const { transientEntities, updatedVehicleEntities } = processIncomingEntities(
-            freshData?.entity,
+        const { updatedVehicleEntities } = processIncomingEntities(
+            freshData.response?.entity,
             activeVehicleEntities // Pass current array to update from
         );
 
         activeVehicleEntities = updatedVehicleEntities; // Update global state
-
-        cachedRealtimeData = {
-            status: 'OK',
-            response: {
-                header: freshData.header,
-                entity: [
-                    ...transientEntities,
-                    ...activeVehicleEntities, // Combine for full cache
-                ],
-            },
-        };
 
         activeTrainEntities = activeVehicleEntities.filter(entity =>
             entity.vehicle?.vehicle?.id?.startsWith('59') ?? false
@@ -362,11 +329,10 @@ async function initializeServer() {
         log(LOG_LABELS.ERROR, `Failed to load track blocks from ${TRACK_BLOCKS_CONFIG.file}`, { errorMessage: getErrorMessage(error) });
     }
 
-
     log(LOG_LABELS.SYSTEM, 'Performing initial data fetch...');
     await refreshRealtimeData();
 
-    if (cachedRealtimeData) {
+    if (activeVehicleEntities.length) {
         await saveGtfsCache();
     } else {
         log(LOG_LABELS.CACHE, 'Skipping initial cache save due to failed initial data fetch.');
@@ -379,7 +345,7 @@ async function initializeServer() {
     setInterval(saveGtfsCache, CACHE_CONFIG.saveIntervalMs);
 
     const isDataReady = (res: express.Response): boolean => {
-        if (!cachedRealtimeData || !lastSuccessfulFetchTimestamp) {
+        if (!activeVehicleEntities.length || !lastSuccessfulFetchTimestamp) {
             res.status(503).json({
                 error: 'Service Unavailable: Data is initializing or first fetch failed.',
                 lastAttemptIso: lastSuccessfulFetchTimestamp ? new Date(lastSuccessfulFetchTimestamp).toISOString() : null,
@@ -396,7 +362,13 @@ async function initializeServer() {
 
     app.get('/api/data', (_req, res) => {
         if (!isDataReady(res)) return;
-        res.json(cachedRealtimeData); // Entire cached GTFS-RT feed
+        res.json({
+            status: 'OK',
+            response: {
+                header: {}, // Optionally fill with latest header if available
+                entity: activeVehicleEntities,
+            },
+        });
     });
 
     app.get('/api/vehicles', (_req, res) => {
@@ -419,7 +391,7 @@ async function initializeServer() {
         }
 
         res.json({
-            status: cachedRealtimeData && lastSuccessfulFetchTimestamp ? 'OK' : 'INITIALIZING_OR_ERROR',
+            status: activeVehicleEntities.length && lastSuccessfulFetchTimestamp ? 'OK' : 'INITIALIZING_OR_ERROR',
             serverTimeIso: new Date(now).toISOString(),
             processUptimeSec: process.uptime().toFixed(1),
             refreshIntervalSec: SERVER_CONFIG.fetchIntervalMs / 1000,
