@@ -12,6 +12,8 @@ import {
     updateLedMapWithOccupancy
 } from './trackBlocks';
 
+import { loadTrainPairsFromCache, checkForTrainPairs } from './trainPairs';
+
 import type { GTFSRealtime, Entity } from 'gtfs-types';
 
 // --- Configuration Loading ---
@@ -286,6 +288,8 @@ async function refreshRealtimeData() {
             entity.vehicle?.vehicle?.id?.startsWith('59') ?? false
         );
 
+        activeTrainEntities = await checkForTrainPairs(activeTrainEntities);
+
         currentLedMap = await updateLedMapWithOccupancy(trackBlockDefinitions, activeTrainEntities, currentLedMap);
 
         lastSuccessfulFetchTimestamp = Date.now();
@@ -317,11 +321,13 @@ async function initializeServer() {
     });
 
     await restoreGtfsCache();
+    await loadTrainPairsFromCache();
 
     try {
         trackBlockDefinitions = await loadTrackBlocks(TRACK_BLOCKS_CONFIG.file);
         if (trackBlockDefinitions.length > 0) {
-            log(LOG_LABELS.BLOCK, `${trackBlockDefinitions.length} track blocks loaded from ${TRACK_BLOCKS_CONFIG.file}`);
+            const priorityBlocks = trackBlockDefinitions.filter(block => block.priority).length;
+            log(LOG_LABELS.BLOCK, `${trackBlockDefinitions.length} track blocks (${priorityBlocks} priority) loaded from ${TRACK_BLOCKS_CONFIG.file}`);
         } else {
             log(LOG_LABELS.BLOCK, `No track blocks found or loaded from ${TRACK_BLOCKS_CONFIG.file}. LED map functionality might be limited.`);
         }

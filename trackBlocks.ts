@@ -1,10 +1,11 @@
 import fs from 'fs';
-import { DOMParser } from '@xmldom/xmldom';
+import { DOMParser, Element } from '@xmldom/xmldom';
 import type { Entity } from 'gtfs-types';
 
 // --- Interfaces ---
 export interface TrackBlock {
     id: string; // Name of the KML Placemark
+    priority: boolean; // Indicates if this block is a high priority block
     polygon: Array<[number, number]>; // [latitude, longitude] tuples
 }
 
@@ -55,7 +56,8 @@ export async function loadTrackBlocks(filePath: string): Promise<TrackBlock[]> {
     for (const placemark of Array.from(placemarks)) {
         const nameElement = placemark.getElementsByTagName('name')[0];
         // Use unique ID based on current count if name is missing
-        const id = nameElement?.textContent || `trackblock-${loadedBlocks.length}`;
+        const id = nameElement?.textContent;
+        const priority = /[a-zA-Z]/.test(id);
         const coordinatesElement = placemark.getElementsByTagName('coordinates')[0];
         const coordsString = coordinatesElement?.textContent?.trim();
 
@@ -69,7 +71,7 @@ export async function loadTrackBlocks(filePath: string): Promise<TrackBlock[]> {
                 .filter(point => !isNaN(point[0]) && !isNaN(point[1])); // Ensure valid numbers
 
             if (points.length > 0) { // Only add if there are valid points
-                loadedBlocks.push({ id, polygon: points });
+                loadedBlocks.push({ id, priority, polygon: points });
             } else {
                 console.warn(`Placemark '${id}' had no valid coordinate points after parsing.`);
             }
@@ -130,6 +132,10 @@ export async function updateLedMapWithOccupancy(
 ): Promise<LedMap> {
     currentOccupiedBlocks.clear();
 
+    const timestampCutoff = ((Date.now() / 1000) - (60)); // 1 minute ago
+
+    trainPositions = trainPositions.filter(train => train.vehicle?.timestamp && train.vehicle?.timestamp > timestampCutoff); // Filter out trains not updated recently
+
     for (const train of trainPositions) {
         // Ensure the entity has vehicle and position data
         if (!train.vehicle?.position) {
@@ -143,13 +149,31 @@ export async function updateLedMapWithOccupancy(
 
         const routeId = train.vehicle.trip?.route_id;
 
+        // Check if the train is in a priority block first
         for (const blockDef of trackBlockDefinitions) {
-            if (isPointInPolygon(latitude, longitude, blockDef.polygon)) {
-                currentOccupiedBlocks.add({
-                    trackBlockId: blockDef.id,
-                    vehicleId: train.id, // train.id is the GTFS entity ID (string)
-                    routeId: routeId, // Can be undefined
-                });
+            if (blockDef.priority) {
+                if (isPointInPolygon(latitude, longitude, blockDef.polygon)) {
+                    currentOccupiedBlocks.add({
+                        trackBlockId: blockDef.id,
+                        vehicleId: train.id, // train.id is the GTFS entity ID (string)
+                        routeId: routeId, // Can be undefined
+                    });
+                    continue; // Stop checking further blocks once a block is found
+                }
+            }
+        }
+
+        // Then check for non-priority blocks
+        for (const blockDef of trackBlockDefinitions) {
+            if (!blockDef.priority) {
+                if (isPointInPolygon(latitude, longitude, blockDef.polygon)) {
+                    currentOccupiedBlocks.add({
+                        trackBlockId: blockDef.id,
+                        vehicleId: train.id, // train.id is the GTFS entity ID (string)
+                        routeId: routeId, // Can be undefined
+                    });
+                    continue; // Stop checking further blocks once a block is found
+                }
             }
         }
     }
@@ -176,7 +200,7 @@ function generateLedMapFromOccupancy(ledMap: LedMap): LedMap {
             const trackBlockNum = parseInt(occupiedInfo.trackBlockId, 10);
 
             if (isNaN(trackBlockNum)) {
-                // console.warn(`Track block ID '${occupiedInfo.trackBlockId}' is not a valid number. Skipping for LED map.`);
+                console.warn(`Track block ID '${occupiedInfo.trackBlockId}' is not a valid number. Skipping for LED map.`);
                 continue;
             }
 
