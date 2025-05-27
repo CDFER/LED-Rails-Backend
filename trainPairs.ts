@@ -6,7 +6,7 @@ import type { Entity } from 'gtfs-types';
 const PAIR_CONFIG = {
     minSpeed: 3, // Minimum speed in m/s to consider a train for pairing
     maxDistance: 1050, // Maximum distance in meters to consider trains as a pair (30s at 35 m/s)
-    maxSpeed: 50, // Maximum speed in m/s to consider
+    maxSpeed: 35, // Maximum speed in m/s to consider
     trainLength: 72, // Train length in meters (used for distance calculations)
     maxSpeedDiff: 3, // Maximum speed difference in m/s to consider trains as a pair
     maxBearingDiff: 30, // Maximum bearing difference in degrees to consider trains as a pair
@@ -106,13 +106,11 @@ export async function checkForTrainPairs(rawTrains: Entity[]): Promise<Entity[]>
         const [idA, idB] = trainPair.vehicleIds;
         const trainA = rawTrains.find(train => train.vehicle?.vehicle?.id === idA)?.vehicle;
         const trainB = rawTrains.find(train => train.vehicle?.vehicle?.id === idB)?.vehicle;
-        if (trainA?.position && trainB?.position && trainA?.timestamp && trainB?.timestamp) {
-            const timeDiff = Math.abs(trainA?.timestamp - trainB?.timestamp);
-            let distance = calculateDistance(trainA.position?.latitude, trainA.position?.longitude, trainB.position?.latitude, trainB.position?.longitude);
-            distance = Math.max(distance - 2 * PAIR_CONFIG.trainLength, 0); // Adjust distance by train length to account for the front of the trains
-            const speed = distance / timeDiff; // Speed in m/s
-            if (speed > PAIR_CONFIG.maxSpeed && timeDiff > 1) { // Speed limit breached (ignore if timeDiff is very small)
-                console.log(`Pair ${trainPair.pairKey} broken speed limit: ${distance.toFixed(1)}/${timeDiff.toFixed(1)}=${(speed).toFixed(1)} m/s`);
+        if (trainA?.position && trainB?.position) {
+            const distance = calculateDistance(trainA.position?.latitude, trainA.position?.longitude, trainB.position?.latitude, trainB.position?.longitude);
+
+            if (distance > PAIR_CONFIG.maxDistance) {
+                console.log(`Pair ${trainPair.pairKey} broken distance limit: ${distance.toFixed(1)} meters @ ${trainA.latitude}, ${trainA.longitude} and ${trainB.latitude}, ${trainB.longitude}`);
                 console.log(trainPair);
                 trainPairs = trainPairs.filter(pair => pair.pairKey !== trainPair.pairKey); // Remove pair if distance criteria is breached
             }
@@ -139,7 +137,7 @@ export async function checkForTrainPairs(rawTrains: Entity[]): Promise<Entity[]>
 
             let distance = calculateDistance(posA.latitude!, posA.longitude!, posB.latitude!, posB.longitude!); // Calculate distance between the two trains
             distance = Math.max(distance - 2 * PAIR_CONFIG.trainLength, 0); // Adjust distance by train length to account for the GPS being in one end of the train (AMP car)
-            if (distance > PAIR_CONFIG.maxDistance) continue;
+            if (distance > (2 * PAIR_CONFIG.trainLength)) continue;
 
             const timeDiff = Math.abs(trainAEntity.vehicle.timestamp - trainBEntity.vehicle.timestamp);
             const speed = distance / timeDiff;

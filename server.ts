@@ -118,6 +118,7 @@ let trackBlockDefinitions: TrackBlock[] = [];
 let currentLedMap: LedMap = {
     version: "1.0.0",
     lineColors: {
+        "0": "#000000", // Default "unoccupied" color
         "1": "#ff00ff", // Default "out of service" color
         "2": "#00ff00",
         "3": "#ff8000",

@@ -1,4 +1,4 @@
-import fs from 'fs';
+import { promises as fs } from 'fs';
 import { DOMParser } from '@xmldom/xmldom';
 import type { Entity } from 'gtfs-types';
 
@@ -11,8 +11,12 @@ export interface TrackBlock {
 
 export interface LedBusConfig {
     busId: string; // Corresponds to keys in BLOCK_RANGES_BY_BUS_ID
-    leds: Record<string, number>; // ledIndex (string) to colorId (number)
+    leds: Record<string, { // Key is LED index (string)
+        colorId: number;   // Color identifier
+        timestamp: number; // Last update time (Epoch Seconds timestamp)
+    }>;
 }
+
 
 export interface LedMap {
     version: string;
@@ -24,6 +28,8 @@ export interface LedMap {
 interface OccupiedBlockInfo {
     trackBlockId: string; // ID of the TrackBlock (KML Placemark name, e.g., "301")
     vehicleId: string; // Vehicle ID from GTFS e.g. "59185"
+    timestamp: number; // Epoch (seconds) Timestamp of the vehicle's position
+    occupied: boolean; // Whether the block is occupied
     routeId: string | undefined; // Route ID from GTFS e.g. "WEST-201"
 }
 
@@ -41,14 +47,14 @@ const ROUTE_TO_COLOR_ID_MAP: Record<string, number> = {
     'STH-201': 5,
 };
 const DEFAULT_OCCUPIED_COLOR_ID = 1; // Default color for out of service trains
+const BLACK_COLOR_ID = 0; // Default color for unoccupied LEDs
 
 // Module-level state for currently occupied blocks by trains
-// Cleared and repopulated on each update.
-const currentOccupiedBlocks = new Set<OccupiedBlockInfo>();
+let currentOccupiedBlocks: OccupiedBlockInfo[] = [];
 
 // --- KML Parsing ---
 export async function loadTrackBlocks(filePath: string): Promise<TrackBlock[]> {
-    const kmlContent = await fs.promises.readFile(filePath, 'utf-8');
+    const kmlContent = await fs.readFile(filePath, 'utf-8');
     const doc = new DOMParser().parseFromString(kmlContent, 'text/xml');
     const loadedBlocks: TrackBlock[] = [];
     const placemarks = doc.getElementsByTagName('Placemark');
@@ -144,34 +150,57 @@ export async function updateLedMapWithOccupancy(
     trains: Entity[],
     ledMap: LedMap
 ): Promise<LedMap> {
-    currentOccupiedBlocks.clear();
-    const now = Date.now() / 1000 - 180; // 3 minutes ago
+    // currentOccupiedBlocks.clear();
+    // currentOccupiedBlocks = []; // Reset the occupied blocks for each update
 
-    const processBlock = (train: Entity, block: TrackBlock) => {
-        const { latitude, longitude } = train.vehicle!.position!;
+    const processBlock = (train: Entity, block: TrackBlock): boolean => {
+        const { latitude, longitude } = train.vehicle?.position ?? {};
         if (!latitude || !longitude) return false;
 
         if (isPointInPolygon(latitude, longitude, block.polygon)) {
-            currentOccupiedBlocks.add({
-                trackBlockId: block.id,
-                vehicleId: train.id,
-                routeId: train.vehicle?.trip?.route_id,
-            });
             return true;
         }
         return false;
     };
 
+    // Filter out blocks that are not occupied
+    currentOccupiedBlocks = currentOccupiedBlocks.filter(block => block.occupied);
+
+    const recentCutoff = (Date.now() / 1000) - 180; // 3 minutes ago
     trains
-        .filter(t => (t.vehicle?.timestamp ?? 0) > now)
+        .filter(t => (t.vehicle?.timestamp ?? 0) > recentCutoff)
         .forEach(train => {
             if (!train.vehicle?.position) return;
 
+            let foundBlockId: string | undefined = undefined;
+
             for (const block of trackBlocks) {
-                if (processBlock(train, block)) break;
+                if (processBlock(train, block)) {
+                    foundBlockId = block.id;
+                    break;
+                }
+            }
+
+            if (foundBlockId) {
+                const entry: OccupiedBlockInfo = {
+                    trackBlockId: foundBlockId,
+                    vehicleId: train.id,
+                    timestamp: train.vehicle!.timestamp,
+                    occupied: true,
+                    routeId: train.vehicle?.trip?.route_id,
+                };
+
+                // Find and update existing entry or add new one
+                const existingIndex = currentOccupiedBlocks.findIndex(e => e.vehicleId === train.id);
+                if (existingIndex > -1 && currentOccupiedBlocks[existingIndex]) {
+                    currentOccupiedBlocks[existingIndex].occupied = false; // Mark as not occupied
+                    currentOccupiedBlocks[existingIndex].timestamp = train.vehicle!.timestamp; // Update timestamp
+                }
+                currentOccupiedBlocks.push(entry);
             }
         });
 
+    await fs.writeFile('cache/blocks.json', JSON.stringify(currentOccupiedBlocks, null, 2));
     return generateLedMapFromOccupancy(ledMap);
 }
 
@@ -205,13 +234,15 @@ function generateLedMapFromOccupancy(ledMap: LedMap): LedMap {
                 const ledIndexStr = ledIndex.toString();
 
                 // Determine color: specific route color or default occupied color
-                const colorId = ROUTE_TO_COLOR_ID_MAP[occupiedInfo.routeId ?? ''] ?? DEFAULT_OCCUPIED_COLOR_ID;
+                let colorId = BLACK_COLOR_ID; // Default color for unoccupied LEDs
+                if (occupiedInfo.occupied) {
+                    colorId = ROUTE_TO_COLOR_ID_MAP[occupiedInfo.routeId ?? ''] ?? DEFAULT_OCCUPIED_COLOR_ID;
+                }
 
-                // Set LED color. Prioritize specific colors.
-                // If LED is unassigned or has default color, assign the new color.
-                // If LED already has a specific color, it keeps it (first specific color wins).
-                if (busConfig.leds[ledIndexStr] === undefined || busConfig.leds[ledIndexStr] === DEFAULT_OCCUPIED_COLOR_ID) {
-                    busConfig.leds[ledIndexStr] = colorId;
+                // Set LED color. Prioritize specific high index colors.
+                const existingColor = busConfig.leds[ledIndexStr]?.colorId;
+                if (existingColor == undefined || existingColor < colorId) {
+                    busConfig.leds[ledIndexStr] = { colorId, timestamp: occupiedInfo.timestamp + 20 };
                 }
             }
         }
