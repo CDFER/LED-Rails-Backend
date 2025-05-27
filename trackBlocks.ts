@@ -1,5 +1,5 @@
 import fs from 'fs';
-import { DOMParser, Element } from '@xmldom/xmldom';
+import { DOMParser } from '@xmldom/xmldom';
 import type { Entity } from 'gtfs-types';
 
 // --- Interfaces ---
@@ -57,7 +57,13 @@ export async function loadTrackBlocks(filePath: string): Promise<TrackBlock[]> {
         const nameElement = placemark.getElementsByTagName('name')[0];
         // Use unique ID based on current count if name is missing
         const id = nameElement?.textContent;
-        const priority = /[a-zA-Z]/.test(id);
+        // skip placemarks without a name
+        if (!id) {
+            console.warn('Placemark without a name found, skipping.');
+            continue;
+        }
+
+        const priority = /[a-zA-Z]/.test(id ?? '');
         const coordinatesElement = placemark.getElementsByTagName('coordinates')[0];
         const coordsString = coordinatesElement?.textContent?.trim();
 
@@ -70,7 +76,7 @@ export async function loadTrackBlocks(filePath: string): Promise<TrackBlock[]> {
                 })
                 .filter(point => !isNaN(point[0]) && !isNaN(point[1])); // Ensure valid numbers
 
-            if (points.length > 0) { // Only add if there are valid points
+            if (id && points.length > 0) { // Only add if there are valid points
                 loadedBlocks.push({ id, priority, polygon: points });
             } else {
                 console.warn(`Placemark '${id}' had no valid coordinate points after parsing.`);
@@ -79,7 +85,11 @@ export async function loadTrackBlocks(filePath: string): Promise<TrackBlock[]> {
             console.warn(`Placemark '${id}' is missing coordinates.`);
         }
     }
-    return loadedBlocks;
+
+    // Sort blocks with priority first
+    const sortedBlocks = [...loadedBlocks].sort((a, b) =>
+        Number(b.priority) - Number(a.priority));
+    return sortedBlocks;
 }
 
 // --- Geometric Calculation ---
@@ -118,67 +128,53 @@ function isPointInPolygon(pointLat: number, pointLng: number, polygon: Array<[nu
 
 // --- LED Map Logic ---
 /**
- * Updates the LED map based on train positions and track blocks.
- * This function has side effects: it clears and populates `currentOccupiedBlocks`.
- * @param trackBlockDefinitions Array of defined track blocks with their polygons.
- * @param trainPositions Array of current train GTFS entities.
- * @param ledMap The LEDMap object to update (will be mutated).
- * @returns The updated LEDMap object.
+ * Updates LED map state based on train positions within track block polygons
+ * 
+ * @param trackBlocks Array of track block definitions with geofencing polygons (priority blocks first)
+ * @param trains Array of train entities with position data
+ * @param ledMap LED map object to be updated
+ * @returns Promise resolving to updated LED map
+ * 
+ * @sideeffects
+ * - Clears and repopulates `currentOccupiedBlocks` Set
+ * - Mutates the provided `ledMap` object
  */
 export async function updateLedMapWithOccupancy(
-    trackBlockDefinitions: TrackBlock[],
-    trainPositions: Entity[],
+    trackBlocks: TrackBlock[],
+    trains: Entity[],
     ledMap: LedMap
 ): Promise<LedMap> {
     currentOccupiedBlocks.clear();
+    const now = Date.now() / 1000 - 180; // 3 minutes ago
 
-    const timestampCutoff = ((Date.now() / 1000) - (60)); // 1 minute ago
+    const processBlock = (train: Entity, block: TrackBlock) => {
+        const { latitude, longitude } = train.vehicle!.position!;
+        if (!latitude || !longitude) return false;
 
-    trainPositions = trainPositions.filter(train => train.vehicle?.timestamp && train.vehicle?.timestamp > timestampCutoff); // Filter out trains not updated recently
-
-    for (const train of trainPositions) {
-        // Ensure the entity has vehicle and position data
-        if (!train.vehicle?.position) {
-            continue; // Skip if no vehicle or position data
+        if (isPointInPolygon(latitude, longitude, block.polygon)) {
+            currentOccupiedBlocks.add({
+                trackBlockId: block.id,
+                vehicleId: train.id,
+                routeId: train.vehicle?.trip?.route_id,
+            });
+            return true;
         }
+        return false;
+    };
 
-        const { latitude, longitude } = train.vehicle.position;
-        if (latitude === undefined || longitude === undefined) {
-            continue; // Skip if latitude or longitude is missing
-        }
+    trains
+        .filter(t => (t.vehicle?.timestamp ?? 0) > now)
+        .forEach(train => {
+            if (!train.vehicle?.position) return;
 
-        const routeId = train.vehicle.trip?.route_id;
-
-        // Check if the train is in a priority block first
-        for (const blockDef of trackBlockDefinitions) {
-            if (blockDef.priority) {
-                if (isPointInPolygon(latitude, longitude, blockDef.polygon)) {
-                    currentOccupiedBlocks.add({
-                        trackBlockId: blockDef.id,
-                        vehicleId: train.id, // train.id is the GTFS entity ID (string)
-                        routeId: routeId, // Can be undefined
-                    });
-                    continue; // Stop checking further blocks once a block is found
-                }
+            for (const block of trackBlocks) {
+                if (processBlock(train, block)) break;
             }
-        }
+        });
 
-        // Then check for non-priority blocks
-        for (const blockDef of trackBlockDefinitions) {
-            if (!blockDef.priority) {
-                if (isPointInPolygon(latitude, longitude, blockDef.polygon)) {
-                    currentOccupiedBlocks.add({
-                        trackBlockId: blockDef.id,
-                        vehicleId: train.id, // train.id is the GTFS entity ID (string)
-                        routeId: routeId, // Can be undefined
-                    });
-                    continue; // Stop checking further blocks once a block is found
-                }
-            }
-        }
-    }
     return generateLedMapFromOccupancy(ledMap);
 }
+
 
 /**
  * Generates the LED status for each bus in the LED map based on `currentOccupiedBlocks`.

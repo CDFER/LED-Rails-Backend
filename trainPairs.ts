@@ -1,12 +1,11 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import type { Entity } from 'gtfs-types';
-import { time } from 'console';
 
 // --- Configuration for Pair Detection ---
 const PAIR_CONFIG = {
     minSpeed: 3, // Minimum speed in m/s to consider a train for pairing
-    maxDistance: 700, // Maximum distance in meters to consider trains as a pair (20s at 35 m/s)
+    maxDistance: 1050, // Maximum distance in meters to consider trains as a pair (30s at 35 m/s)
     maxSpeed: 50, // Maximum speed in m/s to consider
     trainLength: 72, // Train length in meters (used for distance calculations)
     maxSpeedDiff: 3, // Maximum speed difference in m/s to consider trains as a pair
@@ -65,14 +64,15 @@ function calculateBearingDifference(bearing1: number, bearing2: number): number 
  * Loads train pairs from the cache file into trainPairs
  * Should be called once at server startup.
  */
-export async function loadTrainPairsFromCache() {
+export async function loadTrainPairsFromCache(): Promise<number> {
     try {
         await fs.mkdir(PAIR_CONFIG.cacheFolder, { recursive: true }); // Ensure directory exists
         const fileContent = await fs.readFile(TRAIN_PAIRS_CACHE_FILE, 'utf-8');
         trainPairs = JSON.parse(fileContent) as TrainPair[];
-        console.log(`Successfully loaded ${trainPairs.length} train pair(s) from ${path.basename(TRAIN_PAIRS_CACHE_FILE)}.`);
+        return trainPairs.length;
     } catch (error) {
         console.warn(`Failed to load train pairs from cache: ${getErrorMessage(error)}`);
+        return 0; // Return 0 if loading fails
     }
 }
 
@@ -138,7 +138,7 @@ export async function checkForTrainPairs(rawTrains: Entity[]): Promise<Entity[]>
             if (!trainAEntity.vehicle?.timestamp || !trainBEntity.vehicle?.timestamp) continue; // Skip if timestamps are missing
 
             let distance = calculateDistance(posA.latitude!, posA.longitude!, posB.latitude!, posB.longitude!); // Calculate distance between the two trains
-            distance = Math.max(distance - 2 * PAIR_CONFIG.trainLength, 0); // Adjust distance by train length to account for the front of the trains
+            distance = Math.max(distance - 2 * PAIR_CONFIG.trainLength, 0); // Adjust distance by train length to account for the GPS being in one end of the train (AMP car)
             if (distance > PAIR_CONFIG.maxDistance) continue;
 
             const timeDiff = Math.abs(trainAEntity.vehicle.timestamp - trainBEntity.vehicle.timestamp);

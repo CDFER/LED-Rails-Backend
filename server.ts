@@ -321,7 +321,8 @@ async function initializeServer() {
     });
 
     await restoreGtfsCache();
-    await loadTrainPairsFromCache();
+    const trainPairs = await loadTrainPairsFromCache();
+    if (trainPairs) log(LOG_LABELS.CACHE, `Loaded ${trainPairs} train pairs from cache.`);
 
     try {
         trackBlockDefinitions = await loadTrackBlocks(TRACK_BLOCKS_CONFIG.file);
