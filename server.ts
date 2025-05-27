@@ -304,9 +304,10 @@ async function refreshRealtimeData() {
             processingMs: Date.now() - processingStartTime,
         });
 
-    } catch (error) {
-        log(LOG_LABELS.ERROR, 'Data refresh failed.', { errorMessage: getErrorMessage(error) });
+        // } catch (error) {
+        //     log(LOG_LABELS.ERROR, 'Data refresh failed.', { errorMessage: getErrorMessage(error) });
     } finally {
+
         isFetchInProgress = false;
     }
 }

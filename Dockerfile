@@ -30,6 +30,7 @@ COPY --from=prerelease /usr/src/app/server.ts .
 COPY --from=prerelease /usr/src/app/package.json .
 COPY --from=prerelease /usr/src/app/trackBlocks.ts .
 COPY --from=prerelease /usr/src/app/trackBlocks.kml .
+COPY --from=prerelease /usr/src/app/trainPairs.ts .
 
 # run the app
 USER root

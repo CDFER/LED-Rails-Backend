@@ -110,7 +110,7 @@ export async function checkForTrainPairs(rawTrains: Entity[]): Promise<Entity[]>
             const distance = calculateDistance(trainA.position?.latitude, trainA.position?.longitude, trainB.position?.latitude, trainB.position?.longitude);
 
             if (distance > PAIR_CONFIG.maxDistance) {
-                console.log(`Pair ${trainPair.pairKey} broken distance limit: ${distance.toFixed(1)} meters @ ${trainA.latitude}, ${trainA.longitude} and ${trainB.latitude}, ${trainB.longitude}`);
+                console.log(`Pair ${trainPair.pairKey} broken distance limit: ${distance.toFixed(1)} meters`);
                 console.log(trainPair);
                 trainPairs = trainPairs.filter(pair => pair.pairKey !== trainPair.pairKey); // Remove pair if distance criteria is breached
             }
