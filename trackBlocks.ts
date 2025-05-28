@@ -3,41 +3,43 @@ import { DOMParser } from '@xmldom/xmldom';
 import type { Entity } from 'gtfs-types';
 
 // --- Interfaces ---
-export interface TrackBlock {
-    id: string; // Name of the KML Placemark
-    priority: boolean; // Indicates if this block is a high priority block
-    polygon: Array<[number, number]>; // [latitude, longitude] tuples
+export interface LEDUpdate {
+    b: number; // Track block number (e.g., 302)
+    c: number[]; // Start and End Color IDs
+    t: number; // Offset time from timestamp in seconds
 }
 
-export interface LedBusConfig {
-    busId: string; // Corresponds to keys in BLOCK_RANGES_BY_BUS_ID
-    leds: Record<string, { // Key is LED index (string)
-        colorId: number;   // Color identifier
-        timestamp: number; // Last update time (Epoch Seconds timestamp)
-    }>;
+export interface LEDMapUpdate {
+    version: string;                    // Intended Version of the Board (e.g. V1.0.0)
+    timestamp: number;                  // Epoch Seconds timestamp of this update
+    update: number;                     // Offset time from timestamp for next update
+    colors: Record<number, number[]>;   // Map color Id to [R,G,B]
+    updates: LEDUpdate[];               // Map block number to LEDUpdate
 }
 
-
-export interface LedMap {
-    version: string;
-    lineColors: Record<string, string>; // colorId (string) to hex color string
-    busses: LedBusConfig[];
+interface TrackBlock {
+    blockNumber: number;                // Track block number (ref from pcb) (e.g., D302 is 302)
+    name: string;                       // Name of the KML Placemark (e.g. "302 - Parnell")
+    priority: boolean;                  // Indicates if this block is a high priority block (e.g. stations)
+    polygon: Array<[number, number]>;   // Array of [latitude, longitude] tuples
 }
 
-// Represents a train found to be occupying a specific track block
-interface OccupiedBlockInfo {
-    trackBlockId: string; // ID of the TrackBlock (KML Placemark name, e.g., "301")
-    vehicleId: string; // Vehicle ID from GTFS e.g. "59185"
-    timestamp: number; // Epoch (seconds) Timestamp of the vehicle's position
-    occupied: boolean; // Whether the block is occupied
-    routeId: string | undefined; // Route ID from GTFS e.g. "WEST-201"
+interface BlockUpdate {
+    blockNumber: number | undefined;    // Track block number (e.g., 301) (same as TrackBlock.blockNumber)
+    timestamp: number;                  // Epoch (seconds) Timestamp of the vehicle's position
+    preColorId: number;                 // Pre update color ID
+    postColorID: number;                // Post update color ID
+}
+
+interface TrainInfo {
+    trainId: string; // Vehicle ID from GTFS e.g. "59185" for AMP185
+    position: { latitude: number; longitude: number; timestamp: number }; // GTFS Position update of the train
+    currentBlock?: number | undefined; // Track block number (e.g., 301)
+    previousBlock?: number | undefined; // Previous block number (e.g., 300)
+    colorId: number; // Converted using ROUTE_TO_COLOR_ID_MAP
 }
 
 // --- Configuration ---
-const BLOCK_RANGES_BY_BUS_ID: Record<string, { min: number; max: number }> = {
-    STRAND_MNK: { min: 300, max: 343 },
-    NAL_NIMT: { min: 100, max: 207 },
-};
 
 // Defines mapping from GTFS route_id to a numeric color identifier for the LED map
 const ROUTE_TO_COLOR_ID_MAP: Record<string, number> = {
@@ -46,14 +48,19 @@ const ROUTE_TO_COLOR_ID_MAP: Record<string, number> = {
     'ONE-201': 4,
     'STH-201': 5,
 };
-const DEFAULT_OCCUPIED_COLOR_ID = 1; // Default color for out of service trains
-const BLACK_COLOR_ID = 0; // Default color for unoccupied LEDs
+const OUT_OF_SERVICE_COLOR_ID = 1; // Default color for out of service trains
+const OFF_COLOR_ID = 0; // Default color for unoccupied LEDs
+
+const DISPLAY_THRESHOLD = 180; // 3 minutes in seconds
+const UPDATE_INTERVAL = 20; // Update interval in seconds
 
 // Module-level state for currently occupied blocks by trains
-let currentOccupiedBlocks: OccupiedBlockInfo[] = [];
+const blockUpdates: BlockUpdate[] = [];
+const trackBlocks = new Map<number, TrackBlock>(); // Map<blockNumber, TrackBlock>
+const trackedTrains: TrainInfo[] = [];
 
 // --- KML Parsing ---
-export async function loadTrackBlocks(filePath: string): Promise<TrackBlock[]> {
+export async function loadTrackBlocks(filePath: string) {
     const kmlContent = await fs.readFile(filePath, 'utf-8');
     const doc = new DOMParser().parseFromString(kmlContent, 'text/xml');
     const loadedBlocks: TrackBlock[] = [];
@@ -61,44 +68,58 @@ export async function loadTrackBlocks(filePath: string): Promise<TrackBlock[]> {
 
     for (const placemark of Array.from(placemarks)) {
         const nameElement = placemark.getElementsByTagName('name')[0];
-        // Use unique ID based on current count if name is missing
         const id = nameElement?.textContent;
-        // skip placemarks without a name
+
+        // Skip placemarks without a name
         if (!id) {
             console.warn('Placemark without a name found, skipping.');
             continue;
         }
 
-        const priority = /[a-zA-Z]/.test(id ?? '');
+        const blockNumber = parseInt(id, 10);
+        if (isNaN(blockNumber)) {
+            console.warn(`Invalid block number in ID: ${id}`);
+            continue;
+        }
+
+        const priority = /[a-zA-Z]/.test(id);
         const coordinatesElement = placemark.getElementsByTagName('coordinates')[0];
         const coordsString = coordinatesElement?.textContent?.trim();
 
         if (coordsString) {
             const points = coordsString
-                .split(/\s+/) // Split by one or more spaces
+                .split(/\s+/)
                 .map((coordPairStr) => {
                     const [lon, lat] = coordPairStr.split(',').map(Number);
-                    return [lat, lon] as [number, number]; // KML is lon,lat - we use lat,lon
+                    return [lat, lon] as [number, number];
                 })
-                .filter(point => !isNaN(point[0]) && !isNaN(point[1])); // Ensure valid numbers
+                .filter(point => !isNaN(point[0]) && !isNaN(point[1]));
 
-            if (id && points.length > 0) { // Only add if there are valid points
-                loadedBlocks.push({ id, priority, polygon: points });
+            if (points.length > 0) {
+                loadedBlocks.push({
+                    name: id,
+                    blockNumber,
+                    priority,
+                    polygon: points
+                });
             } else {
-                console.warn(`Placemark '${id}' had no valid coordinate points after parsing.`);
+                console.warn(`Placemark '${id}' had no valid coordinates`);
             }
         } else {
-            console.warn(`Placemark '${id}' is missing coordinates.`);
+            console.warn(`Placemark '${id}' missing coordinates`);
         }
     }
 
-    // Sort blocks with priority first
-    const sortedBlocks = [...loadedBlocks].sort((a, b) =>
-        Number(b.priority) - Number(a.priority));
-    return sortedBlocks;
+    // Clear existing map and add sorted blocks
+    trackBlocks.clear();
+    loadedBlocks
+        .sort((a, b) => Number(b.priority) - Number(a.priority)) // Priority first
+        .forEach(block => {
+            trackBlocks.set(block.blockNumber, block);
+        });
+    return trackBlocks;
 }
 
-// --- Geometric Calculation ---
 /**
  * Checks if a point is inside a polygon using the Ray Casting algorithm.
  * @param pointLat Latitude of the point to check.
@@ -106,8 +127,9 @@ export async function loadTrackBlocks(filePath: string): Promise<TrackBlock[]> {
  * @param polygon Array of [lat, lng] tuples defining the polygon vertices.
  * @returns True if the point is inside the polygon, false otherwise.
  */
-function isPointInPolygon(pointLat: number, pointLng: number, polygon: Array<[number, number]> | undefined): boolean {
-    if (!polygon || polygon.length < 3) { // A polygon needs at least 3 vertices
+function isPointInPolygon(pointLat: number, pointLng: number, polygon: Array<[number, number]>): boolean {
+    if (!polygon || polygon.length < 3) {
+        // A polygon needs at least 3 vertices
         return false;
     }
 
@@ -132,120 +154,135 @@ function isPointInPolygon(pointLat: number, pointLng: number, polygon: Array<[nu
     return isInside;
 }
 
-// --- LED Map Logic ---
+/**
+ * Processes a train entity to check if it occupies a specific track block polygon.
+ * @param train Train with position data
+ * @param blockNumber Track block number to check against
+ * @returns True if the train is within the block's polygon, false otherwise
+ */
+const trainInBlock = (train: TrainInfo, blockNumber: number): boolean => {
+    const block = trackBlocks.get(blockNumber);
+    if (block) {
+        return isPointInPolygon(train.position.latitude, train.position.longitude, block.polygon);
+    }
+    return false;
+};
+
 /**
  * Updates LED map state based on train positions within track block polygons
- * 
- * @param trackBlocks Array of track block definitions with geofencing polygons (priority blocks first)
- * @param trains Array of train entities with position data
+ * @param gtfsTrains Array of train entities with position data
  * @param ledMap LED map object to be updated
  * @returns Promise resolving to updated LED map
- * 
- * @sideeffects
- * - Clears and repopulates `currentOccupiedBlocks` Set
- * - Mutates the provided `ledMap` object
  */
-export async function updateLedMapWithOccupancy(
-    trackBlocks: TrackBlock[],
-    trains: Entity[],
-    ledMap: LedMap
-): Promise<LedMap> {
-    // currentOccupiedBlocks.clear();
-    // currentOccupiedBlocks = []; // Reset the occupied blocks for each update
-
-    const processBlock = (train: Entity, block: TrackBlock): boolean => {
-        const { latitude, longitude } = train.vehicle?.position ?? {};
-        if (!latitude || !longitude) return false;
-
-        if (isPointInPolygon(latitude, longitude, block.polygon)) {
-            return true;
+export async function updateLEDMap(
+    gtfsTrains: Entity[],
+    ledMap: LEDMapUpdate
+): Promise<LEDMapUpdate> {
+    // Mirror gtfsTrains to trackedTrains
+    gtfsTrains.forEach(train => {
+        const existing = trackedTrains.find(t => t.trainId === train.id);
+        if (existing) {
+            // Update existing train position
+            existing.position.latitude = train.vehicle?.position?.latitude ?? 0;
+            existing.position.longitude = train.vehicle?.position?.longitude ?? 0;
+            existing.position.timestamp = train.vehicle?.timestamp ?? 0;
+            existing.colorId = ROUTE_TO_COLOR_ID_MAP[train.vehicle?.trip?.route_id ?? ''] ?? OUT_OF_SERVICE_COLOR_ID;
+        } else {
+            // Add new train
+            trackedTrains.push({
+                trainId: train.id,
+                position: {
+                    latitude: train.vehicle?.position?.latitude ?? 0,
+                    longitude: train.vehicle?.position?.longitude ?? 0,
+                    timestamp: train.vehicle?.timestamp ?? 0,
+                },
+                colorId: ROUTE_TO_COLOR_ID_MAP[train.vehicle?.trip?.route_id ?? ''] ?? OUT_OF_SERVICE_COLOR_ID,
+                currentBlock: undefined,
+                previousBlock: undefined,
+            });
         }
-        return false;
-    };
+    });
 
-    // Filter out blocks that are not occupied
-    currentOccupiedBlocks = currentOccupiedBlocks.filter(block => block.occupied);
-
-    const recentCutoff = (Date.now() / 1000) - 180; // 3 minutes ago
-    trains
-        .filter(t => (t.vehicle?.timestamp ?? 0) > recentCutoff)
-        .forEach(train => {
-            if (!train.vehicle?.position) return;
-
-            let foundBlockId: string | undefined = undefined;
-
-            for (const block of trackBlocks) {
-                if (processBlock(train, block)) {
-                    foundBlockId = block.id;
-                    break;
+    trackedTrains.forEach(train => {
+        if (train.currentBlock && trainInBlock(train, train.currentBlock)) {
+            // Train is still in the same block, no need to update
+            train.previousBlock = train.currentBlock;
+        } else {
+            // Current Block invalid, find the new block it occupies 
+            // TODO: Optimize this search by checking nearby blocks first
+            for (const block of trackBlocks.values()) {
+                if (trainInBlock(train, block.blockNumber)) {
+                    train.previousBlock = train.currentBlock;
+                    train.currentBlock = block.blockNumber;
+                    break; // Found the block, no need to check further
                 }
             }
 
-            if (foundBlockId) {
-                const entry: OccupiedBlockInfo = {
-                    trackBlockId: foundBlockId,
-                    vehicleId: train.id,
-                    timestamp: train.vehicle!.timestamp,
-                    occupied: true,
-                    routeId: train.vehicle?.trip?.route_id,
-                };
+            if (!train.currentBlock) {
+                console.warn(`Train ${train.trainId} is not in any block (${train.position.latitude}, ${train.position.longitude})`);
+            }
+        }
+    });
 
-                // Find and update existing entry or add new one
-                const existingIndex = currentOccupiedBlocks.findIndex(e => e.vehicleId === train.id);
-                if (existingIndex > -1 && currentOccupiedBlocks[existingIndex]) {
-                    currentOccupiedBlocks[existingIndex].occupied = false; // Mark as not occupied
-                    currentOccupiedBlocks[existingIndex].timestamp = train.vehicle!.timestamp; // Update timestamp
-                }
-                currentOccupiedBlocks.push(entry);
+    const now = Math.floor(Date.now() / 1000);
+    const displayCutoff = now - DISPLAY_THRESHOLD;
+    const updateTime = now - UPDATE_INTERVAL;
+    blockUpdates.length = 0; // Clear previous updates
+
+    trackedTrains
+        .filter(train => train.position.timestamp > displayCutoff && train.currentBlock)
+        .forEach(train => {
+            if (train.position.timestamp < updateTime || train.previousBlock === train.currentBlock) {
+                // Update at start of interval (no need for pre post color nonsense)
+                blockUpdates.push({
+                    blockNumber: train.currentBlock,
+                    timestamp: updateTime,
+                    preColorId: train.colorId,
+                    postColorID: train.colorId
+                });
+            } else {
+                // Update during interval, need to set pre and post colors
+                blockUpdates.push({
+                    blockNumber: train.previousBlock,
+                    timestamp: train.position.timestamp,
+                    preColorId: train.colorId,
+                    postColorID: OFF_COLOR_ID
+                });
+                blockUpdates.push({
+                    blockNumber: train.currentBlock,
+                    timestamp: train.position.timestamp,
+                    preColorId: OFF_COLOR_ID,
+                    postColorID: train.colorId
+                });
             }
         });
 
-    await fs.writeFile('cache/blocks.json', JSON.stringify(currentOccupiedBlocks, null, 2));
-    return generateLedMapFromOccupancy(ledMap);
+    // await fs.writeFile('cache/trackedTrains.json', JSON.stringify(trackedTrains, null, 2));
+    // await fs.writeFile('cache/blocksUpdates.json', JSON.stringify(blockUpdates, null, 2));
+    return generateLedMap(ledMap, blockUpdates, updateTime);
 }
-
 
 /**
  * Generates the LED status for each bus in the LED map based on `currentOccupiedBlocks`.
  * This function mutates the input `ledMap`.
- * @param ledMap The LEDMap object to update.
+ * @param ledMapUpdate The LEDMap object to update.
  * @returns The mutated LEDMap object with updated LED statuses.
  */
-function generateLedMapFromOccupancy(ledMap: LedMap): LedMap {
-    for (const busConfig of ledMap.busses) {
-        busConfig.leds = {}; // Clear previous LEDs for this bus
+function generateLedMap(ledMapUpdate: LEDMapUpdate, blockUpdates: BlockUpdate[], updateTime: number): LEDMapUpdate {
+    ledMapUpdate.updates = [];
 
-        const blockRange = BLOCK_RANGES_BY_BUS_ID[busConfig.busId];
-        if (!blockRange) {
-            console.warn(`No block range definition found for bus_id: ${busConfig.busId}`);
-            continue;
-        }
-
-        for (const occupiedInfo of currentOccupiedBlocks) {
-            const trackBlockNum = parseInt(occupiedInfo.trackBlockId, 10);
-
-            if (isNaN(trackBlockNum)) {
-                console.warn(`Track block ID '${occupiedInfo.trackBlockId}' is not a valid number. Skipping for LED map.`);
-                continue;
+    blockUpdates
+        .filter(update => update.blockNumber !== undefined)
+        .forEach(update => {
+            if (update.blockNumber) {
+                ledMapUpdate.updates.push({
+                    b: update.blockNumber,
+                    c: [update.preColorId, update.postColorID],
+                    t: update.timestamp - updateTime,
+                });
             }
+        });
 
-            if (trackBlockNum >= blockRange.min && trackBlockNum <= blockRange.max) {
-                const ledIndex = trackBlockNum - blockRange.min;
-                const ledIndexStr = ledIndex.toString();
-
-                // Determine color: specific route color or default occupied color
-                let colorId = BLACK_COLOR_ID; // Default color for unoccupied LEDs
-                if (occupiedInfo.occupied) {
-                    colorId = ROUTE_TO_COLOR_ID_MAP[occupiedInfo.routeId ?? ''] ?? DEFAULT_OCCUPIED_COLOR_ID;
-                }
-
-                // Set LED color. Prioritize specific high index colors.
-                const existingColor = busConfig.leds[ledIndexStr]?.colorId;
-                if (existingColor == undefined || existingColor < colorId) {
-                    busConfig.leds[ledIndexStr] = { colorId, timestamp: occupiedInfo.timestamp + 20 };
-                }
-            }
-        }
-    }
-    return ledMap;
+    ledMapUpdate.timestamp = updateTime + UPDATE_INTERVAL;
+    return ledMapUpdate;
 }

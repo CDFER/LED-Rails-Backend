@@ -6,10 +6,9 @@ import { promises as fs } from 'fs';
 import path from 'path';
 
 import {
-    TrackBlock,
-    LedMap,
+    LEDMapUpdate,
     loadTrackBlocks,
-    updateLedMapWithOccupancy
+    updateLEDMap,
 } from './trackBlocks';
 
 import { loadTrainPairsFromCache, checkForTrainPairs } from './trainPairs';
@@ -112,23 +111,20 @@ let isFetchInProgress = false;
 let activeVehicleEntities: Entity[] = [];
 let activeTrainEntities: Entity[] = [];
 
-let trackBlockDefinitions: TrackBlock[] = [];
-
 // Initial LedMap structure
-let currentLedMap: LedMap = {
+let currentLedMap: LEDMapUpdate = {
     version: "1.0.0",
-    lineColors: {
-        "0": "#000000", // Default "unoccupied" color
-        "1": "#ff00ff", // Default "out of service" color
-        "2": "#00ff00",
-        "3": "#ff8000",
-        "4": "#00ffff",
-        "5": "#ff0000",
+    timestamp: 0,
+    update: Math.floor(SERVER_CONFIG.fetchIntervalMs / 1000) + 5, // Offset time for next update
+    colors: {
+        0: [0, 0, 0],         // Default "unoccupied" color
+        1: [255, 0, 255],     // Default "out of service" color
+        2: [0, 255, 0],
+        3: [255, 128, 0],
+        4: [0, 255, 255],
+        5: [255, 0, 0],
     },
-    busses: [
-        { busId: "STRAND_MNK", leds: {} },
-        { busId: "NAL_NIMT", leds: {} }
-    ]
+    updates: [],
 };
 
 // --- Middleware Setup ---
@@ -291,7 +287,7 @@ async function refreshRealtimeData() {
 
         activeTrainEntities = await checkForTrainPairs(activeTrainEntities);
 
-        currentLedMap = await updateLedMapWithOccupancy(trackBlockDefinitions, activeTrainEntities, currentLedMap);
+        currentLedMap = await updateLEDMap(activeTrainEntities, currentLedMap);
 
         lastSuccessfulFetchTimestamp = Date.now();
 
@@ -327,10 +323,9 @@ async function initializeServer() {
     if (trainPairs) log(LOG_LABELS.CACHE, `Loaded ${trainPairs} train pairs from cache.`);
 
     try {
-        trackBlockDefinitions = await loadTrackBlocks(TRACK_BLOCKS_CONFIG.file);
-        if (trackBlockDefinitions.length > 0) {
-            const priorityBlocks = trackBlockDefinitions.filter(block => block.priority).length;
-            log(LOG_LABELS.BLOCK, `${trackBlockDefinitions.length} track blocks (${priorityBlocks} priority) loaded from ${TRACK_BLOCKS_CONFIG.file}`);
+        const trackBlocks = await loadTrackBlocks(TRACK_BLOCKS_CONFIG.file);
+        if (trackBlocks.size > 0) {
+            log(LOG_LABELS.BLOCK, `${trackBlocks.size} track blocks loaded from ${TRACK_BLOCKS_CONFIG.file}`);
         } else {
             log(LOG_LABELS.BLOCK, `No track blocks found or loaded from ${TRACK_BLOCKS_CONFIG.file}. LED map functionality might be limited.`);
         }

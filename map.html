@@ -217,23 +217,6 @@
                     }
                 });
 
-                // Update polygon colors based on vehicle positions
-                if (trackPolygons.length > 0) {
-                    const vehiclePositions = Array.from(vehicleMarkers.values())
-                        .map(marker => marker.getLatLng());
-
-                    trackPolygons.forEach(polygon => {
-                        const polyCoords = polygon.getLatLngs()[0];
-                        const hasVehicle = vehiclePositions.some(latLng =>
-                            isPointInPolygon(latLng, polyCoords)
-                        );
-                        polygon.setStyle({
-                            color: hasVehicle ? 'green' : 'red',
-                            fillColor: hasVehicle ? 'green' : 'red'
-                        });
-                    });
-                }
-
                 STATUS_ELEMENT.textContent = `Active vehicles: ${vehicleMarkers.size}`;
             } catch (error) {
                 console.error('Vehicle Error:', error);

@@ -5,7 +5,7 @@ import type { Entity } from 'gtfs-types';
 // --- Configuration for Pair Detection ---
 const PAIR_CONFIG = {
     minSpeed: 3, // Minimum speed in m/s to consider a train for pairing
-    maxDistance: 1050, // Maximum distance in meters to consider trains as a pair (30s at 35 m/s)
+    maxDistance: 2100, // Maximum distance in meters to keeps trains as a pair
     maxSpeed: 35, // Maximum speed in m/s to consider
     trainLength: 72, // Train length in meters (used for distance calculations)
     maxSpeedDiff: 3, // Maximum speed difference in m/s to consider trains as a pair
