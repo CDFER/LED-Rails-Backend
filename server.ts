@@ -224,7 +224,13 @@ async function restoreGtfsCache() {
     try {
         const compressedData = await fs.readFile(CACHE_CONFIG.file);
         const decompressed = Bun.gunzipSync(compressedData);
-        activeVehicleEntities = JSON.parse(Buffer.from(decompressed).toString('utf8')) as Entity[];
+        const parsedCacheData = JSON.parse(Buffer.from(decompressed).toString('utf8'));
+        if (Array.isArray(parsedCacheData)) {
+            activeVehicleEntities = parsedCacheData as Entity[];
+        } else {
+            log(LOG_LABELS.CACHE, `Restored cache data is not an array (type: ${typeof parsedCacheData}). Initializing with empty array.`);
+            activeVehicleEntities = [];
+        }
         const msPerDay = 1000 * 60 * 60 * 24; // 24 hours in milliseconds
         const estimatedDailyWriteMiB = (compressedData.byteLength * (msPerDay / CACHE_CONFIG.saveIntervalMs)) / (1024 ** 2);
         log(LOG_LABELS.CACHE, `Restored ${path.basename(CACHE_CONFIG.file)}`,
