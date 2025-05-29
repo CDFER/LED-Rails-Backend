@@ -19,6 +19,7 @@ export interface LEDMapUpdate {
 
 interface TrackBlock {
     blockNumber: number;                // Track block number (ref from pcb) (e.g., D302 is 302)
+    altBlockNumber: number | undefined; // Alternative block number if applicable (for platforms 3/4)
     name: string;                       // Name of the KML Placemark (e.g. "302 - Parnell")
     priority: boolean;                  // Indicates if this block is a high priority block (e.g. stations)
     polygon: Array<[number, number]>;   // Array of [latitude, longitude] tuples
@@ -46,6 +47,7 @@ const OUT_OF_SERVICE_COLOR_ID = 1; // Default color for out of service trains
 const DISPLAY_THRESHOLD = 180; // 3 minutes in seconds
 const UPDATE_INTERVAL = 20; // Update interval in seconds
 
+
 // Module-level state for currently occupied blocks by trains
 const trackBlocks = new Map<number, TrackBlock>(); // Map<blockNumber, TrackBlock>
 const trackedTrains: TrainInfo[] = [];
@@ -67,13 +69,26 @@ export async function loadTrackBlocks(filePath: string) {
             continue;
         }
 
-        const blockNumber = parseInt(id, 10);
-        if (isNaN(blockNumber)) {
-            console.warn(`Invalid block number in ID: ${id}`);
+        // Extracts the first sequence of digits from the ID to use as the block number.
+        const blockNumberMatch = id.match(/(\d+)/);
+        let blockNumber: number;
+        let altBlockNumber: number | undefined;
+
+        if (blockNumberMatch && blockNumberMatch[1]) {
+            blockNumber = parseInt(blockNumberMatch[1], 10);
+        } else {
+            // This fallback is primarily for IDs that do not contain any digits.
+            console.warn(`ID does not contain a numeric block number: ${id}`);
             continue;
         }
 
-        const priority = /[a-zA-Z]/.test(id);
+        const altBlockNumberMatch = id.match(/\+(\d+)/);
+        if (altBlockNumberMatch && altBlockNumberMatch[1]) {
+            altBlockNumber = parseInt(altBlockNumberMatch[1], 10);
+        }
+
+        const mainIdPart = id.split('+')[0] || ''; // Ensure mainIdPart is always a string
+        const priority = /[a-zA-Z]/.test(mainIdPart); // Check priority on the main block ID part
         const coordinatesElement = placemark.getElementsByTagName('coordinates')[0];
         const coordsString = coordinatesElement?.textContent?.trim();
 
@@ -90,6 +105,7 @@ export async function loadTrackBlocks(filePath: string) {
                 loadedBlocks.push({
                     name: id,
                     blockNumber,
+                    altBlockNumber,
                     priority,
                     polygon: points
                 });
@@ -108,6 +124,11 @@ export async function loadTrackBlocks(filePath: string) {
         .forEach(block => {
             trackBlocks.set(block.blockNumber, block);
         });
+
+    // Only save track blocks when in dev environment (.env contains NODE_ENV=development)
+    if (process.env.NODE_ENV === 'development') {
+        fs.writeFile('cache/trackBlocks.json', JSON.stringify(Array.from(trackBlocks), null, 2));
+    }
     return trackBlocks;
 }
 
@@ -194,26 +215,37 @@ export async function updateLEDMap(
         }
     });
 
-    trackedTrains.forEach(train => {
-        if (train.currentBlock && trainInBlock(train, train.currentBlock)) {
-            // Train is still in the same block, no need to update
-            train.previousBlock = train.currentBlock;
-        } else {
-            // Current Block invalid, find the new block it occupies 
-            // TODO: Optimize this search by checking nearby blocks first
-            for (const block of trackBlocks.values()) {
-                if (trainInBlock(train, block.blockNumber)) {
-                    if (train.currentBlock) { train.previousBlock = train.currentBlock } else { train.previousBlock = block.blockNumber; }
-                    train.currentBlock = block.blockNumber;
-                    break; // Found the block, no need to check further
+    const occupiedBlocks = new Set<number>();
+
+    trackedTrains
+        .filter(train => train.position.latitude != 0 && train.position.longitude != 0) // Filter out trains with invalid positions
+        .forEach(train => {
+            if (train.currentBlock && trainInBlock(train, train.currentBlock)) {
+                // Train is still in the same block, no need to update
+                train.previousBlock = train.currentBlock;
+                occupiedBlocks.add(train.currentBlock);
+            } else {
+                // Current Block invalid, find the new block it occupies 
+                // TODO: Optimize this search by checking nearby blocks first
+                for (const block of trackBlocks.values()) {
+                    if (trainInBlock(train, block.blockNumber)) {
+                        if (train.currentBlock) { train.previousBlock = train.currentBlock } else { train.previousBlock = block.blockNumber; }
+
+                        if (occupiedBlocks.has(block.blockNumber) && block.altBlockNumber && !occupiedBlocks.has(block.altBlockNumber)) {
+                            train.currentBlock = block.altBlockNumber; // Use alternative block if already occupied
+                        } else {
+                            train.currentBlock = block.blockNumber;
+                        }
+                        occupiedBlocks.add(train.currentBlock);
+                        break; // Found the block, no need to check further
+                    }
+                }
+
+                if (!train.currentBlock) {
+                    console.warn(`Train ${train.trainId} is not in any block (${train.position.latitude}, ${train.position.longitude})`);
                 }
             }
-
-            if (!train.currentBlock) {
-                console.warn(`Train ${train.trainId} is not in any block (${train.position.latitude}, ${train.position.longitude})`);
-            }
-        }
-    });
+        });
 
     // await fs.writeFile('cache/trackedTrains.json', JSON.stringify(trackedTrains, null, 2));
     return generateLedMap(ledMap, trackedTrains);

@@ -106,7 +106,7 @@ export async function checkForTrainPairs(rawTrains: Entity[]): Promise<Entity[]>
         const [idA, idB] = trainPair.vehicleIds;
         const trainA = rawTrains.find(train => train.vehicle?.vehicle?.id === idA)?.vehicle;
         const trainB = rawTrains.find(train => train.vehicle?.vehicle?.id === idB)?.vehicle;
-        if (trainA?.position && trainB?.position) {
+        if (trainA?.position && trainB?.position && trainA.position?.latitude != 0 && trainB.position?.latitude != 0) {
             const distance = calculateDistance(trainA.position?.latitude, trainA.position?.longitude, trainB.position?.latitude, trainB.position?.longitude);
 
             if (distance > PAIR_CONFIG.maxDistance) {
