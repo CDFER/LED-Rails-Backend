@@ -5,11 +5,11 @@ import type { Entity } from 'gtfs-types';
 // --- Configuration for Pair Detection ---
 const PAIR_CONFIG = {
     minSpeed: 3, // Minimum speed in m/s to consider a train for pairing
-    maxDistance: 2100, // Maximum distance in meters to keeps trains as a pair
+    maxDistance: 1000, // Maximum distance in meters to keeps trains as a pair
     maxSpeed: 35, // Maximum speed in m/s to consider
     trainLength: 72, // Train length in meters (used for distance calculations)
     maxSpeedDiff: 3, // Maximum speed difference in m/s to consider trains as a pair
-    maxBearingDiff: 30, // Maximum bearing difference in degrees to consider trains as a pair
+    maxBearingDiff: 5, // Maximum bearing difference in degrees to consider trains as a pair
     cacheFolder: path.join(__dirname, 'cache'),
 };
 
@@ -110,8 +110,7 @@ export async function checkForTrainPairs(rawTrains: Entity[]): Promise<Entity[]>
             const distance = calculateDistance(trainA.position?.latitude, trainA.position?.longitude, trainB.position?.latitude, trainB.position?.longitude);
 
             if (distance > PAIR_CONFIG.maxDistance) {
-                console.log(`Pair ${trainPair.pairKey} broken distance limit: ${distance.toFixed(1)} meters`);
-                console.log(trainPair);
+                console.log(`Pair ${trainPair.pairKey} broken distance limit: ${distance.toFixed(0)}m @ ${[[trainA.position?.latitude.toFixed(5), trainA.position?.longitude.toFixed(5)], [trainB.position?.latitude.toFixed(5), trainB.position?.longitude.toFixed(5)]]}`);
                 trainPairs = trainPairs.filter(pair => pair.pairKey !== trainPair.pairKey); // Remove pair if distance criteria is breached
             }
         }

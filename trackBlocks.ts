@@ -4,8 +4,8 @@ import type { Entity } from 'gtfs-types';
 
 // --- Interfaces ---
 export interface LEDUpdate {
-    b: number; // Track block number (e.g., 302)
-    c: number[]; // Start and End Color IDs
+    b: number[]; // [Pre, Post] update track block number (e.g., 302)
+    c: number; // Color ID
     t: number; // Offset time from timestamp in seconds
 }
 
@@ -22,13 +22,6 @@ interface TrackBlock {
     name: string;                       // Name of the KML Placemark (e.g. "302 - Parnell")
     priority: boolean;                  // Indicates if this block is a high priority block (e.g. stations)
     polygon: Array<[number, number]>;   // Array of [latitude, longitude] tuples
-}
-
-interface BlockUpdate {
-    blockNumber: number | undefined;    // Track block number (e.g., 301) (same as TrackBlock.blockNumber)
-    timestamp: number;                  // Epoch (seconds) Timestamp of the vehicle's position
-    preColorId: number;                 // Pre update color ID
-    postColorID: number;                // Post update color ID
 }
 
 interface TrainInfo {
@@ -49,13 +42,11 @@ const ROUTE_TO_COLOR_ID_MAP: Record<string, number> = {
     'STH-201': 5,
 };
 const OUT_OF_SERVICE_COLOR_ID = 1; // Default color for out of service trains
-const OFF_COLOR_ID = 0; // Default color for unoccupied LEDs
 
 const DISPLAY_THRESHOLD = 180; // 3 minutes in seconds
 const UPDATE_INTERVAL = 20; // Update interval in seconds
 
 // Module-level state for currently occupied blocks by trains
-const blockUpdates: BlockUpdate[] = [];
 const trackBlocks = new Map<number, TrackBlock>(); // Map<blockNumber, TrackBlock>
 const trackedTrains: TrainInfo[] = [];
 
@@ -212,7 +203,7 @@ export async function updateLEDMap(
             // TODO: Optimize this search by checking nearby blocks first
             for (const block of trackBlocks.values()) {
                 if (trainInBlock(train, block.blockNumber)) {
-                    train.previousBlock = train.currentBlock;
+                    if (train.currentBlock) { train.previousBlock = train.currentBlock } else { train.previousBlock = block.blockNumber; }
                     train.currentBlock = block.blockNumber;
                     break; // Found the block, no need to check further
                 }
@@ -224,42 +215,8 @@ export async function updateLEDMap(
         }
     });
 
-    const now = Math.floor(Date.now() / 1000);
-    const displayCutoff = now - DISPLAY_THRESHOLD;
-    const updateTime = now - UPDATE_INTERVAL;
-    blockUpdates.length = 0; // Clear previous updates
-
-    trackedTrains
-        .filter(train => train.position.timestamp > displayCutoff && train.currentBlock)
-        .forEach(train => {
-            if (train.position.timestamp < updateTime || train.previousBlock === train.currentBlock) {
-                // Update at start of interval (no need for pre post color nonsense)
-                blockUpdates.push({
-                    blockNumber: train.currentBlock,
-                    timestamp: updateTime,
-                    preColorId: train.colorId,
-                    postColorID: train.colorId
-                });
-            } else {
-                // Update during interval, need to set pre and post colors
-                blockUpdates.push({
-                    blockNumber: train.previousBlock,
-                    timestamp: train.position.timestamp,
-                    preColorId: train.colorId,
-                    postColorID: OFF_COLOR_ID
-                });
-                blockUpdates.push({
-                    blockNumber: train.currentBlock,
-                    timestamp: train.position.timestamp,
-                    preColorId: OFF_COLOR_ID,
-                    postColorID: train.colorId
-                });
-            }
-        });
-
     // await fs.writeFile('cache/trackedTrains.json', JSON.stringify(trackedTrains, null, 2));
-    // await fs.writeFile('cache/blocksUpdates.json', JSON.stringify(blockUpdates, null, 2));
-    return generateLedMap(ledMap, blockUpdates, updateTime);
+    return generateLedMap(ledMap, trackedTrains);
 }
 
 /**
@@ -268,18 +225,25 @@ export async function updateLEDMap(
  * @param ledMapUpdate The LEDMap object to update.
  * @returns The mutated LEDMap object with updated LED statuses.
  */
-function generateLedMap(ledMapUpdate: LEDMapUpdate, blockUpdates: BlockUpdate[], updateTime: number): LEDMapUpdate {
+function generateLedMap(ledMapUpdate: LEDMapUpdate, trackedTrains: TrainInfo[]): LEDMapUpdate {
     ledMapUpdate.updates = [];
 
-    blockUpdates
-        .filter(update => update.blockNumber !== undefined)
-        .forEach(update => {
-            if (update.blockNumber) {
+    const now = Math.floor(Date.now() / 1000);
+    const displayCutoff = now - DISPLAY_THRESHOLD;
+    const updateTime = now - UPDATE_INTERVAL;
+
+    trackedTrains
+        .filter(train => train.position.timestamp >= displayCutoff)
+        .forEach(train => {
+            if (train.currentBlock && train.previousBlock) {
                 ledMapUpdate.updates.push({
-                    b: update.blockNumber,
-                    c: [update.preColorId, update.postColorID],
-                    t: update.timestamp - updateTime,
+                    b: [train.previousBlock, train.currentBlock],
+                    c: train.colorId,
+                    t: Math.max(train.position.timestamp - updateTime, 0),
                 });
+                // if (train.currentBlock !== train.previousBlock) {
+                //     console.log(`Train ${train.trainId} moved from block ${train.previousBlock} to ${train.currentBlock}`);
+                // }
             }
         });
 

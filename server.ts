@@ -257,9 +257,9 @@ async function refreshRealtimeData() {
         return;
     }
     isFetchInProgress = true;
-    const requestStartTime = Date.now();
 
     try {
+        let startTime = Date.now();
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
         const response = await fetch(API_CONFIG.url, {
@@ -273,13 +273,14 @@ async function refreshRealtimeData() {
         });
         clearTimeout(timeoutId);
 
-        const processingStartTime = Date.now();
         if (!response.ok) {
             throw new Error(`HTTP error! Status: ${response.status} ${response.statusText}. URL: ${response.url}`);
         }
 
         const freshData = await response.json() as GTFSRealtime;
         const responseEncoding = response.headers.get('Content-Encoding') || 'identity';
+        const requestTime = Date.now() - startTime;
+        startTime = Date.now();
         const { updatedVehicleEntities } = processIncomingEntities(
             freshData.response?.entity,
             activeVehicleEntities // Pass current array to update from
@@ -290,10 +291,15 @@ async function refreshRealtimeData() {
         activeTrainEntities = activeVehicleEntities.filter(entity =>
             entity.vehicle?.vehicle?.id?.startsWith('59') ?? false
         );
+        const preprocessingTime = Date.now() - startTime;
 
+        startTime = Date.now();
         activeTrainEntities = await checkForTrainPairs(activeTrainEntities);
+        const checkForTrainPairsTime = Date.now() - startTime;
 
+        startTime = Date.now();
         currentLedMap = await updateLEDMap(activeTrainEntities, currentLedMap);
+        const ledMapUpdateTime = Date.now() - startTime;
 
         lastSuccessfulFetchTimestamp = Date.now();
 
@@ -302,14 +308,15 @@ async function refreshRealtimeData() {
             trainsTracked: activeTrainEntities.length,
             encoding: responseEncoding,
             memoryMiB: (process.memoryUsage().rss / (1024 ** 2)).toFixed(0),
-            requestMs: processingStartTime - requestStartTime,
-            processingMs: Date.now() - processingStartTime,
+        });
+        log(LOG_LABELS.FETCH, `Processing Times (ms)`, {
+            request: requestTime,
+            preprocessing: preprocessingTime,
+            checkForTrainPairs: checkForTrainPairsTime,
+            ledMapUpdate: ledMapUpdateTime,
         });
 
-        // } catch (error) {
-        //     log(LOG_LABELS.ERROR, 'Data refresh failed.', { errorMessage: getErrorMessage(error) });
     } finally {
-
         isFetchInProgress = false;
     }
 }
