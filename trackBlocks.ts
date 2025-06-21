@@ -27,7 +27,7 @@ interface TrackBlock {
 
 interface TrainInfo {
     trainId: string; // Vehicle ID from GTFS e.g. "59185" for AMP185
-    position: { latitude: number; longitude: number; timestamp: number }; // GTFS Position update of the train
+    position: { latitude: number; longitude: number; timestamp: number; speed: number }; // GTFS Position update of the train
     currentBlock?: number | undefined; // Track block number (e.g., 301)
     previousBlock?: number | undefined; // Previous block number (e.g., 300)
     colorId: number; // Converted using ROUTE_TO_COLOR_ID_MAP
@@ -50,7 +50,7 @@ const UPDATE_INTERVAL = 20; // Update interval in seconds
 
 // Module-level state for currently occupied blocks by trains
 const trackBlocks = new Map<number, TrackBlock>(); // Map<blockNumber, TrackBlock>
-const trackedTrains: TrainInfo[] = [];
+export const trackedTrains: TrainInfo[] = [];
 
 // --- KML Parsing ---
 export async function loadTrackBlocks(filePath: string) {
@@ -155,12 +155,14 @@ function isPointInPolygon(pointLat: number, pointLng: number, polygon: Array<[nu
 
         // Check if the point's latitude is between the latitudes of the edge's endpoints
         const isLatBetweenEdgePoints = (lat_i > pointLat) !== (lat_j > pointLat);
-        // Calculate the longitude of the intersection of the ray with the edge
-        const intersectionLng = (lng_j - lng_i) * (pointLat - lat_i) / (lat_j - lat_i) + lng_i;
-
-        // If the point's latitude is between edge points and its longitude is to the left of intersection
-        if (isLatBetweenEdgePoints && pointLng < intersectionLng) {
-            isInside = !isInside;
+        // Guard against division by zero
+        if (lat_j !== lat_i) {
+            // Calculate the longitude of the intersection of the ray with the edge
+            const intersectionLng = (lng_j - lng_i) * (pointLat - lat_i) / (lat_j - lat_i) + lng_i;
+            // If the point's latitude is between edge points and its longitude is to the left of intersection
+            if (isLatBetweenEdgePoints && pointLng < intersectionLng) {
+                isInside = !isInside;
+            }
         }
     }
     return isInside;
@@ -195,8 +197,15 @@ export async function updateLEDMap(
         const existing = trackedTrains.find(t => t.trainId === train.id);
         if (existing) {
             // Update existing train position
-            existing.position.latitude = train.vehicle?.position?.latitude ?? 0;
-            existing.position.longitude = train.vehicle?.position?.longitude ?? 0;
+            if (train.vehicle?.position?.speed == 0 && existing.position.speed == 0) {
+                // If the train is stopped, average its position with the existing one
+                existing.position.latitude = (existing.position.latitude * 0.9 + (train.vehicle?.position?.latitude ?? 0) * 0.1);
+                existing.position.longitude = (existing.position.longitude * 0.9 + (train.vehicle?.position?.longitude ?? 0) * 0.1);
+            } else {
+                existing.position.latitude = train.vehicle?.position?.latitude ?? 0;
+                existing.position.longitude = train.vehicle?.position?.longitude ?? 0;
+            }
+            existing.position.speed = train.vehicle?.position?.speed ?? 0;
             existing.position.timestamp = train.vehicle?.timestamp ?? 0;
             existing.colorId = ROUTE_TO_COLOR_ID_MAP[train.vehicle?.trip?.route_id ?? ''] ?? OUT_OF_SERVICE_COLOR_ID;
         } else {
@@ -207,6 +216,7 @@ export async function updateLEDMap(
                     latitude: train.vehicle?.position?.latitude ?? 0,
                     longitude: train.vehicle?.position?.longitude ?? 0,
                     timestamp: train.vehicle?.timestamp ?? 0,
+                    speed: train.vehicle?.position?.speed ?? 0,
                 },
                 colorId: ROUTE_TO_COLOR_ID_MAP[train.vehicle?.trip?.route_id ?? ''] ?? OUT_OF_SERVICE_COLOR_ID,
                 currentBlock: undefined,
@@ -247,7 +257,9 @@ export async function updateLEDMap(
             }
         });
 
-    // await fs.writeFile('cache/trackedTrains.json', JSON.stringify(trackedTrains, null, 2));
+    if (process.env.NODE_ENV === 'development') {
+        await fs.writeFile('cache/trackedTrains.json', JSON.stringify(trackedTrains, null, 2));
+    }
     return generateLedMap(ledMap, trackedTrains);
 }
 
@@ -279,6 +291,6 @@ function generateLedMap(ledMapUpdate: LEDMapUpdate, trackedTrains: TrainInfo[]):
             }
         });
 
-    ledMapUpdate.timestamp = updateTime + UPDATE_INTERVAL;
+    ledMapUpdate.timestamp = now;
     return ledMapUpdate;
 }

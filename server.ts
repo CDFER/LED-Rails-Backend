@@ -9,6 +9,7 @@ import {
     LEDMapUpdate,
     loadTrackBlocks,
     updateLEDMap,
+    trackedTrains,
 } from './trackBlocks';
 
 import { loadTrainPairsFromCache, checkForTrainPairs } from './trainPairs';
@@ -113,9 +114,9 @@ let activeTrainEntities: Entity[] = [];
 
 // Initial LedMap structure
 let currentLedMap: LEDMapUpdate = {
-    version: "1.0.0",
+    version: "100",
     timestamp: 0,
-    update: Math.floor(SERVER_CONFIG.fetchIntervalMs / 1000) + 5, // Offset time for next update
+    update: Math.floor(SERVER_CONFIG.fetchIntervalMs / 1000), // Offset time for next update
     colors: {
         0: [0, 0, 0],         // Default "unoccupied" color
         1: [255, 0, 255],     // Default "out of service" color
@@ -372,9 +373,14 @@ async function initializeServer() {
         return true;
     };
 
-    app.get('/ledmap100.json', (_req, res) => {
+    app.get('/akl-ltm/100.json', (_req, res) => {
         if (!isDataReady(res)) return;
         res.json(currentLedMap);
+    });
+
+    app.get('/trackedtrains', (_req, res) => {
+        if (!isDataReady(res)) return;
+        res.json(trackedTrains);
     });
 
     app.get('/api/data', (_req, res) => {

@@ -51,6 +51,38 @@
             background-color: #808080;
             /* Grey color for stale markers */
         }
+
+        .vehicle-arrow {
+            width: 18px;
+            height: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .vehicle-arrow-shape {
+            width: 0;
+            height: 0;
+            border-left: 6px solid transparent;
+            border-right: 6px solid transparent;
+            border-bottom: 36px solid #3388ff;
+            /* Default blue color */
+            opacity: 0.95;
+        }
+
+        .vehicle-arrow.stale .vehicle-arrow-shape {
+            border-bottom-color: #808080;
+        }
+
+        #map,
+        .leaflet-container,
+        .leaflet-layer {
+            background: #000 !important;
+        }
+
+        .leaflet-tile {
+            filter: grayscale(1) brightness(1.1) contrast(1.1) invert(1.0);
+        }
     </style>
 </head>
 
@@ -65,10 +97,10 @@
 
     <script>
         // --- Configuration ---
-        // const API_ENDPOINT = '/api/vehicles'; // Assuming server is on the same host/port
-        // const API_ENDPOINT = 'http://localhost:3000/api/vehicles';
+        // const API_ENDPOINT = 'http://localhost:3000/api/vehicles'; // Assuming server is on the same host/port
         const API_ENDPOINT = 'http://localhost:3000/api/vehicles/trains';
-        const REFRESH_INTERVAL_MS = 20 * 1000; // Refresh every 20 seconds
+        // const API_ENDPOINT = 'http://170.64.177.77:3000/api/vehicles/trains';
+        const REFRESH_INTERVAL_MS = 5 * 1000; // Refresh every 5 seconds
         const INITIAL_MAP_CENTER = [-37.025, 174.760]; // Auckland CBD approx. coordinates
         const INITIAL_ZOOM_LEVEL = 12;
         const STATUS_ELEMENT = document.getElementById('status');
@@ -76,25 +108,6 @@
         // --- Track Polygon Storage ---
         let trackPolygons = []; // Stores all track block polygons
 
-        // --- Point-in-Polygon Check ---
-        function isPointInPolygon(latLng, polyCoords) {
-            const x = latLng.lng;
-            const y = latLng.lat;
-            let inside = false;
-
-            for (let i = 0, j = polyCoords.length - 1; i < polyCoords.length; j = i++) {
-                const xi = polyCoords[i].lng;
-                const yi = polyCoords[i].lat;
-                const xj = polyCoords[j].lng;
-                const yj = polyCoords[j].lat;
-
-                const intersect = ((yi > y) !== (yj > y)) &&
-                    (x < ((xj - xi) * (y - yi)) / (yj - yi) + xi);
-
-                if (intersect) inside = !inside;
-            }
-            return inside;
-        }
 
         // --- Relative Time Formatter ---
         function getRelativeTime(timestamp) {
@@ -121,7 +134,8 @@
         const map = L.map('map').setView(INITIAL_MAP_CENTER, INITIAL_ZOOM_LEVEL);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,
-            attribution: '&copy; OpenStreetMap'
+            attribution: '&copy; OpenStreetMap',
+            useCache: true,
         }).addTo(map);
 
         // --- KML Track Blocks Loading ---
@@ -143,8 +157,9 @@
                     const polygon = L.polygon(coordsArray, {
                         color: 'red',
                         weight: 2,
+                        opacity: 0.5,
                         fillColor: 'red',
-                        fillOpacity: 0.2
+                        fillOpacity: 0.1
                     }).addTo(map);
                     polygon.bindPopup(name);
                     trackPolygons.push(polygon);
@@ -160,6 +175,27 @@
         const staleIcon = L.divIcon({ className: 'vehicle-marker stale' });
         let vehicleMarkers = new Map();
 
+        // --- Route color mapping ---
+        const ROUTE_COLORS = {
+            'WEST-201': '#95c840',   // Green
+            'EAST-201': '#fdb918',   // Orange
+            'ONE-201': '#00adef',   // Blue
+            'STH-201': '#ed302a',   // Red
+        };
+        const DEFAULT_ARROW_COLOR = '#ff00ff';
+
+        function createArrowIcon(bearing, isStale, color) {
+            // bearing: degrees, 0 = north
+            const rotation = bearing ? `rotate(${bearing}deg)` : '';
+            const arrowColor = isStale ? '#808080' : (color || DEFAULT_ARROW_COLOR);
+            return L.divIcon({
+                className: `vehicle-arrow${isStale ? ' stale' : ''}`,
+                iconSize: [18, 18],
+                iconAnchor: [9, 9],
+                html: `<div class="vehicle-arrow-shape" style="transform: ${rotation}; border-bottom-color: ${arrowColor};"></div>`
+            });
+        }
+
         async function fetchAndDisplayVehicles() {
             try {
                 const response = await fetch(API_ENDPOINT);
@@ -172,36 +208,37 @@
                     const position = vehicleData?.position;
                     const vehicleId = vehicleData?.vehicle?.id;
                     const vehicleInfo = vehicleData?.vehicle;
-                    const label = vehicleInfo?.label;
                     const latitude = position?.latitude;
                     const longitude = position?.longitude;
                     const ageInMs = vehicleData.timestamp ? Date.now() - (vehicleData.timestamp * 1000) : Infinity;
-                    const isStale = ageInMs > 60000; // 60 seconds
+                    const isStale = ageInMs > 360000; // 3mins
                     const trip = vehicleData?.trip;
+                    const routeId = trip?.route_id;
+                    const direction = trip?.direction_id == 0 ? ' Northbound' : trip?.direction_id == 1 ? ' Southbound' : '';
+                    const arrowColor = ROUTE_COLORS[routeId] || DEFAULT_ARROW_COLOR;
 
                     if (vehicleId && position?.latitude && position?.longitude) {
                         seenVehicleIds.add(vehicleId);
                         const latLng = [position.latitude, position.longitude];
-
-                        const popupContent = `
-                            <b>Label:</b> ${label}<br>
-                            <b>Vehicle ID:</b> ${vehicleId}<br>
-                            ${trip?.route_id ? `<b>Route:</b> ${trip.route_id}<br>` : ''}
-                            <b>Lat:</b> ${latitude.toFixed(5)}<br>
-                            <b>Lon:</b> ${longitude.toFixed(5)}<br>
-                            ${position.bearing ? `<b>Bearing:</b> ${position.bearing}°<br>` : ''}
-                            ${position.speed ? `<b>Speed:</b> ${(position.speed * 3.6).toFixed(1)} km/h<br>` : ''}
-                            ${vehicleData.timestamp ? `<b>Last Update:</b> ${getRelativeTime(vehicleData.timestamp * 1000)}` : ''}
-                        `;
+                        const icon = createArrowIcon(position.bearing, isStale, arrowColor);
 
                         if (vehicleMarkers.has(vehicleId)) {
-                            vehicleMarkers.get(vehicleId)
-                                .setLatLng(latLng)
-                                .setIcon(isStale
-                                    ? staleIcon
-                                    : activeIcon);
+                            const marker = vehicleMarkers.get(vehicleId);
+                            marker.setLatLng(latLng)
+                                .setIcon(icon);
                         } else {
-                            const marker = L.marker(latLng, { icon: activeIcon })
+                            const popupContent = `
+                            <b>Label:</b> ${vehicleInfo?.label}<br>
+                            <b>Vehicle ID:</b> ${vehicleId}<br>
+                            ${trip?.route_id ? `<b>Route:</b> ${trip.route_id + direction}<br>` : ''}
+                            <b>Lat:</b> ${latitude.toFixed(5)}<br>
+                            <b>Lon:</b> ${longitude.toFixed(5)}<br>
+                            <b>Bearing:</b> ${position.bearing ? `${position.bearing}` : ''}°<br>
+                            <b>Speed:</b> ${(position.speed * 3.6).toFixed(0)}km/h<br>
+                            ${position.odometer ? `<b>Odometer:</b> ${Number((position.odometer / 1000).toFixed(0)).toLocaleString('en-NZ')} km<br>` : ''}
+                            ${vehicleData.timestamp ? `<b>Last Update:</b> ${getRelativeTime(vehicleData.timestamp * 1000)}` : ''}
+                        `;
+                            const marker = L.marker(latLng, { icon })
                                 .bindPopup(popupContent)
                                 .addTo(map);
                             vehicleMarkers.set(vehicleId, marker);

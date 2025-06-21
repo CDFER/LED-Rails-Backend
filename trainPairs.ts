@@ -186,6 +186,7 @@ export async function checkForTrainPairs(rawTrains: Entity[]): Promise<Entity[]>
         await saveTrainPairsToCache();
     }
 
+    // 4. Filter out trains that are part of a pair from the returnedTrains
     trainPairs.forEach(pair => {
         const [idA, idB] = pair.vehicleIds;
         const routeA = returnedTrains.find(train => train.vehicle?.vehicle?.id === idA)?.vehicle?.trip?.route_id;
