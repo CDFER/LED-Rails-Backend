@@ -83,6 +83,38 @@
         .leaflet-tile {
             filter: grayscale(1) brightness(1.1) contrast(1.1) invert(1.0);
         }
+
+        /* Search box styles */
+        #search-container {
+            position: absolute;
+            top: 10px;
+            right: 50px;
+            z-index: 1100;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 6px 12px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.07);
+        }
+
+        #vehicle-search {
+            width: 180px;
+            padding: 4px 8px;
+            border-radius: 3px;
+            border: 1px solid #aaa;
+            outline: none;
+        }
+
+        #search-results {
+            max-height: 180px;
+            overflow-y: auto;
+            font-size: 0.95em;
+        }
+
+        #search-results div {
+            cursor: pointer;
+            padding: 2px 0;
+        }
     </style>
 </head>
 
@@ -90,6 +122,12 @@
 
     <div id="map"></div>
     <div id="status" class="status-overlay">Loading map...</div>
+    <div id="search-container"
+        style="position:absolute;top:10px;right:50px;z-index:1100;background:rgba(255,255,255,0.95);padding:6px 12px;border-radius:4px;border:1px solid #ccc;box-shadow:0 2px 8px rgba(0,0,0,0.07);">
+        <input id="vehicle-search" type="text" placeholder="Search vehicle label..."
+            style="width:180px;padding:4px 8px;border-radius:3px;border:1px solid #aaa;outline:none;" />
+        <div id="search-results" style="max-height:180px;overflow-y:auto;font-size:0.95em;"></div>
+    </div>
 
     <!-- Leaflet JavaScript -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
@@ -183,6 +221,48 @@
             'STH-201': '#ed302a',   // Red
         };
         const DEFAULT_ARROW_COLOR = '#ff00ff';
+        let vehicleLabels = new Map(); // Map label (lowercase) to vehicleId
+
+        // --- Search UI ---
+        const searchInput = document.getElementById('vehicle-search');
+        const searchResults = document.getElementById('search-results');
+
+        function updateSearchResults(query) {
+            searchResults.innerHTML = '';
+            if (!query) return;
+            const matches = Array.from(vehicleLabels.entries())
+                .filter(([label]) => label.includes(query.toLowerCase()));
+            matches.slice(0, 10).forEach(([label, vehicleId]) => {
+                const div = document.createElement('div');
+                div.textContent = label;
+                div.style.cursor = 'pointer';
+                div.style.padding = '2px 0';
+                div.onclick = () => {
+                    const marker = vehicleMarkers.get(vehicleId);
+                    if (marker) {
+                        map.setView(marker.getLatLng(), 16, { animate: true });
+                        marker.openPopup();
+                    }
+                    searchResults.innerHTML = '';
+                    searchInput.value = '';
+                };
+                searchResults.appendChild(div);
+            });
+        }
+        searchInput.addEventListener('input', e => {
+            updateSearchResults(e.target.value);
+        });
+        searchInput.addEventListener('keydown', e => {
+            if (e.key === 'Escape') {
+                searchResults.innerHTML = '';
+                searchInput.value = '';
+            }
+        });
+        document.addEventListener('click', e => {
+            if (!searchInput.contains(e.target) && !searchResults.contains(e.target)) {
+                searchResults.innerHTML = '';
+            }
+        });
 
         function createArrowIcon(bearing, isStale, color) {
             // bearing: degrees, 0 = north
@@ -236,6 +316,10 @@
                         seenVehicleIds.add(vehicleId);
                         const latLng = [position.latitude, position.longitude];
                         const icon = createArrowIcon(position.bearing, isStale, arrowColor);
+                        // Store label for search
+                        if (vehicleInfo?.label) {
+                            vehicleLabels.set(vehicleInfo.label.toLowerCase(), vehicleId);
+                        }
 
                         if (vehicleMarkers.has(vehicleId)) {
                             const marker = vehicleMarkers.get(vehicleId);

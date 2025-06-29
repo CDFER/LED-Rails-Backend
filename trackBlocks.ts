@@ -188,7 +188,7 @@ const trainInBlock = (train: TrainInfo, blockNumber: number): boolean => {
  * @param ledMap LED map object to be updated
  * @returns Promise resolving to updated LED map
  */
-export async function updateTrackedTrains(gtfsTrains: Entity[], invisibleTrainIds: string[] = []): Promise<void> {
+export async function updateTrackedTrains(gtfsTrains: Entity[]): Promise<void> {
     // Mirror gtfsTrains to trackedTrains
     gtfsTrains.forEach(train => {
         const existing = trackedTrains.find(t => t.trainId === train.id);
@@ -226,7 +226,6 @@ export async function updateTrackedTrains(gtfsTrains: Entity[], invisibleTrainId
 
     trackedTrains
         .filter(train => train.position.latitude != 0 && train.position.longitude != 0) // Filter out trains with invalid positions
-        .filter(train => !invisibleTrainIds.includes(train.trainId)) // Filter out invisible trains
         .forEach(train => {
             if (train.currentBlock && trainInBlock(train, train.currentBlock)) {
                 // Train is still in the same block, no need to update
@@ -266,7 +265,7 @@ export async function updateTrackedTrains(gtfsTrains: Entity[], invisibleTrainId
  * @param ledMapUpdate The LEDMap object to update.
  * @returns The mutated LEDMap object with updated LED statuses.
  */
-export function generateLedMap(ledMapUpdate: LEDMapUpdate, trackedTrains: TrainInfo[]): LEDMapUpdate {
+export function generateLedMap(ledMapUpdate: LEDMapUpdate, trackedTrains: TrainInfo[], invisibleTrainIds: string[] = []): LEDMapUpdate {
     ledMapUpdate.updates = [];
 
     const now = Math.floor(Date.now() / 1000);
@@ -275,6 +274,7 @@ export function generateLedMap(ledMapUpdate: LEDMapUpdate, trackedTrains: TrainI
 
     trackedTrains
         .filter(train => train.position.timestamp >= displayCutoff)
+        .filter(train => !invisibleTrainIds.includes(train.trainId)) // Filter out invisible trains
         .forEach(train => {
             if (train.currentBlock && train.previousBlock) {
                 ledMapUpdate.updates.push({

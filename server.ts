@@ -303,9 +303,9 @@ async function refreshRealtimeData() {
         const checkForTrainPairsTime = Date.now() - startTime;
 
         startTime = Date.now();
-        await updateTrackedTrains(activeTrainEntities, invisibleTrainIds);
-        currentLedMap100 = await generateLedMap(currentLedMap100, trackedTrains);
-        currentLedMap110 = await generateLedMap(currentLedMap110, trackedTrains);
+        await updateTrackedTrains(activeTrainEntities);
+        currentLedMap100 = await generateLedMap(currentLedMap100, trackedTrains, invisibleTrainIds);
+        currentLedMap110 = await generateLedMap(currentLedMap110, trackedTrains, invisibleTrainIds);
         const ledMapUpdateTime = Date.now() - startTime;
 
         lastSuccessfulFetchTimestamp = Date.now();
