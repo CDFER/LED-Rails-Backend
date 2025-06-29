@@ -570,14 +570,28 @@
 				<outerBoundaryIs>
 					<LinearRing>
 						<coordinates>
-							174.7713980610234,-36.86613991253356,0 174.7788405350544,-36.86740151163203,0 174.7792920356577,-36.86573202798997,0 174.7703819592948,-36.86387506875631,0 174.7713980610234,-36.86613991253356,0 
+							174.7713980610234,-36.86613991253356,0 174.7737526311531,-36.8660564999506,0 174.7741064006334,-36.86490856140379,0 174.7703819592948,-36.86387506875631,0 174.7713980610234,-36.86613991253356,0 
 						</coordinates>
 					</LinearRing>
 				</outerBoundaryIs>
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>138 - Newmarket Triangle South:West</name>
+			<name>138</name>
+			<styleUrl>#m_ylw-pushpin</styleUrl>
+			<Polygon>
+				<tessellate>1</tessellate>
+				<outerBoundaryIs>
+					<LinearRing>
+						<coordinates>
+							174.7737377824995,-36.86610009393237,0 174.7787930714248,-36.86734383843051,0 174.7792254292655,-36.86632284550837,0 174.7741108770848,-36.86489371753926,0 174.7737377824995,-36.86610009393237,0 
+						</coordinates>
+					</LinearRing>
+				</outerBoundaryIs>
+			</Polygon>
+		</Placemark>
+		<Placemark>
+			<name>139 - Newmarket Triangle South:West</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -591,7 +605,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>139 - Newmarket (+140)</name>
+			<name>140 - Newmarket (+141)</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -605,7 +619,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>141</name>
+			<name>142</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -619,7 +633,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>142</name>
+			<name>143</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -633,7 +647,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>143 - Remuera</name>
+			<name>144 - Remuera</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -647,7 +661,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>144</name>
+			<name>145</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -661,7 +675,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>145 - Greenlane</name>
+			<name>146 - Greenlane</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -675,7 +689,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>146</name>
+			<name>147</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -689,7 +703,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>147 - Ellerslie</name>
+			<name>148 - Ellerslie</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -703,7 +717,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>148</name>
+			<name>149</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -717,7 +731,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>149 - Penrose</name>
+			<name>150 - Penrose</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -731,7 +745,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>150 - Penrose Platform 3</name>
+			<name>151 - Penrose Platform 3</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -745,7 +759,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>151</name>
+			<name>152</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -759,7 +773,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>152</name>
+			<name>153</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -773,7 +787,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>153 - Te Papapa</name>
+			<name>154 - Te Papapa</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -787,7 +801,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>154</name>
+			<name>155</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -801,7 +815,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>155 - Onehunga</name>
+			<name>156 - Onehunga</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -815,7 +829,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>156</name>
+			<name>157</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -829,7 +843,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>157</name>
+			<name>158</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -843,7 +857,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>158</name>
+			<name>159</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -857,7 +871,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>159</name>
+			<name>160</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -871,7 +885,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>161 - Otahuhu (+160)</name>
+			<name>162 - Otahuhu (+161)</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -885,7 +899,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>162</name>
+			<name>163</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -899,7 +913,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>163</name>
+			<name>164</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -913,7 +927,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>164 - Middlemore</name>
+			<name>165 - Middlemore</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -927,7 +941,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>165</name>
+			<name>166</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -941,7 +955,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>166 - Papatoetoe</name>
+			<name>167 - Papatoetoe</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -955,7 +969,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>167</name>
+			<name>168</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -969,7 +983,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>169 - Puhinui (+168)</name>
+			<name>170 - Puhinui (+169)</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -983,7 +997,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>170</name>
+			<name>171</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -997,7 +1011,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>171 - Wiri Depot Platform</name>
+			<name>172 - Wiri Depot Platform</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1011,7 +1025,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>172 - Wiri Depot North</name>
+			<name>173 - Wiri Depot North</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1025,7 +1039,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>173</name>
+			<name>174</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1039,7 +1053,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>174 - Wiri Depot South</name>
+			<name>175 - Wiri Depot South</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1053,7 +1067,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>175 - Homai</name>
+			<name>176 - Homai</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1067,7 +1081,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>176</name>
+			<name>177</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1081,7 +1095,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>177</name>
+			<name>178</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1095,7 +1109,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>178 - Manurewa</name>
+			<name>179 - Manurewa</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1109,7 +1123,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>179</name>
+			<name>180</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1123,7 +1137,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>180 - Te Mahia</name>
+			<name>181 - Te Mahia</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1137,7 +1151,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>181</name>
+			<name>182</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1151,7 +1165,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>182 - Takaanini</name>
+			<name>183 - Takaanini</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1165,7 +1179,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>183</name>
+			<name>184</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1179,7 +1193,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>184</name>
+			<name>185</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1193,7 +1207,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>185</name>
+			<name>186</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1207,7 +1221,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>186 - Papakura Sidings</name>
+			<name>187 - Papakura Sidings</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1221,7 +1235,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>187 - Papakura (+188)</name>
+			<name>188 - Papakura (+189)</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1235,7 +1249,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>189</name>
+			<name>190</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1249,7 +1263,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>190</name>
+			<name>191</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1263,7 +1277,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>191</name>
+			<name>192</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1277,7 +1291,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>192</name>
+			<name>193</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1291,7 +1305,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>193 - Drury</name>
+			<name>194 - Drury</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1305,7 +1319,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>194</name>
+			<name>195</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1319,7 +1333,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>195 - Ngākōroa</name>
+			<name>196 - Ngākōroa</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1333,7 +1347,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>196</name>
+			<name>197</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1347,7 +1361,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>197</name>
+			<name>198</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1361,7 +1375,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>198</name>
+			<name>199</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1375,7 +1389,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>199</name>
+			<name>200</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1389,7 +1403,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>200 - Paerātā</name>
+			<name>201 - Paerātā</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1403,7 +1417,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>201</name>
+			<name>202</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1417,7 +1431,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>202</name>
+			<name>203</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1431,7 +1445,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>203</name>
+			<name>204</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1445,7 +1459,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>204</name>
+			<name>205</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1459,7 +1473,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>206 - Pukekohe (+205)</name>
+			<name>207 - Pukekohe (+206)</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1473,7 +1487,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>207 - Pukekohe Sidings</name>
+			<name>208 - Pukekohe Sidings</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1536,14 +1550,28 @@
 				<outerBoundaryIs>
 					<LinearRing>
 						<coordinates>
-							174.7794299907409,-36.86659347494744,0 174.7800384723453,-36.86705969930927,0 174.7836762388932,-36.86389402459675,0 174.7785483303734,-36.85552038962717,0 174.7772025224201,-36.85587818102811,0 174.7794299907409,-36.86659347494744,0 
+							174.7810417955395,-36.86352826501547,0 174.7842062098351,-36.86312053668242,0 174.7785483303734,-36.85552038962717,0 174.7772025224201,-36.85587818102811,0 174.7810417955395,-36.86352826501547,0 
 						</coordinates>
 					</LinearRing>
 				</outerBoundaryIs>
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>304 - Newmarket Triangle North:South</name>
+			<name>304</name>
+			<styleUrl>#m_ylw-pushpin</styleUrl>
+			<Polygon>
+				<tessellate>1</tessellate>
+				<outerBoundaryIs>
+					<LinearRing>
+						<coordinates>
+							174.7810582687422,-36.86350989988129,0 174.7793223065582,-36.86649142137608,0 174.7801366790263,-36.86713181151568,0 174.7842220229602,-36.86310820428841,0 174.7810582687422,-36.86350989988129,0 
+						</coordinates>
+					</LinearRing>
+				</outerBoundaryIs>
+			</Polygon>
+		</Placemark>
+		<Placemark>
+			<name>305 - Newmarket Triangle North:South</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1557,7 +1585,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>305 - Newmarket Triangle North:West</name>
+			<name>306 - Newmarket Triangle North:West</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1571,7 +1599,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>306 Maungawhau Triangle North:East</name>
+			<name>307 Maungawhau Triangle North:East</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1585,7 +1613,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>307 - Maungawhau Platform 1:2</name>
+			<name>308 - Maungawhau Platform 1:2</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1599,7 +1627,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>314 - Waitematā (+315)</name>
+			<name>315 - Waitematā (+316)</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1613,7 +1641,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>317 (+316)</name>
+			<name>318 (+317)</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1627,7 +1655,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>318</name>
+			<name>319</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1641,7 +1669,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>319 - Quay Park Triangle South:West</name>
+			<name>320 - Quay Park Triangle South:West</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1655,7 +1683,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>320 - Quay Park Triangle East:West</name>
+			<name>321 - Quay Park Triangle East:West</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1669,7 +1697,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>321</name>
+			<name>322</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1683,7 +1711,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>322 - West Car Exchange</name>
+			<name>323 - West Car Exchange</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1697,7 +1725,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>323</name>
+			<name>324</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1711,7 +1739,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>324</name>
+			<name>325</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1725,7 +1753,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>325</name>
+			<name>326</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1739,7 +1767,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>326 - Ōrākei</name>
+			<name>327 - Ōrākei</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1753,7 +1781,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>327</name>
+			<name>328</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1767,7 +1795,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>328 - Meadowbank</name>
+			<name>329 - Meadowbank</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1781,7 +1809,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>329</name>
+			<name>330</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1795,7 +1823,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>330</name>
+			<name>331</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1809,7 +1837,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>331</name>
+			<name>332</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1823,7 +1851,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>332 - Glen Innes</name>
+			<name>333 - Glen Innes</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1837,7 +1865,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>333</name>
+			<name>334</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1851,7 +1879,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>334</name>
+			<name>335</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1865,7 +1893,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>335 - Panmure</name>
+			<name>336 - Panmure</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1879,7 +1907,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>336</name>
+			<name>337</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1893,7 +1921,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>337</name>
+			<name>338</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1907,7 +1935,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>338 - Sylvia Park</name>
+			<name>339 - Sylvia Park</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1921,7 +1949,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>339</name>
+			<name>340</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1935,7 +1963,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>340</name>
+			<name>341</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1949,7 +1977,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>341 - Manukau North:East</name>
+			<name>342 - Manukau North:East</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1963,7 +1991,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>342</name>
+			<name>343</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -1977,7 +2005,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>343 - Manukau</name>
+			<name>344 - Manukau</name>
 			<styleUrl>#m_ylw-pushpin</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>

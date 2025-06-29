@@ -8,8 +8,9 @@ import path from 'path';
 import {
     LEDMapUpdate,
     loadTrackBlocks,
-    updateLEDMap,
+    updateTrackedTrains,
     trackedTrains,
+    generateLedMap,
 } from './trackBlocks';
 
 import { loadTrainPairsFromCache, checkForTrainPairs } from './trainPairs';
@@ -112,11 +113,11 @@ let isFetchInProgress = false;
 let activeVehicleEntities: Entity[] = [];
 let activeTrainEntities: Entity[] = [];
 
-// Initial LedMap structure
-let currentLedMap: LEDMapUpdate = {
-    version: "100",
+// Default LED Map structure
+const defaultLedMap: LEDMapUpdate = {
+    version: "default",
     timestamp: 0,
-    update: Math.floor(SERVER_CONFIG.fetchIntervalMs / 1000), // Offset time for next update
+    update: Math.floor(SERVER_CONFIG.fetchIntervalMs / 1000),
     colors: {
         0: [0, 0, 0],         // Default "unoccupied" color
         1: [255, 0, 255],     // Default "out of service" color
@@ -127,6 +128,9 @@ let currentLedMap: LEDMapUpdate = {
     },
     updates: [],
 };
+
+let currentLedMap100: LEDMapUpdate = { ...defaultLedMap, version: "100" };
+let currentLedMap110: LEDMapUpdate = { ...defaultLedMap, version: "110" };
 
 // --- Middleware Setup ---
 const rateLimiter = rateLimit({
@@ -295,11 +299,13 @@ async function refreshRealtimeData() {
         const preprocessingTime = Date.now() - startTime;
 
         startTime = Date.now();
-        activeTrainEntities = await checkForTrainPairs(activeTrainEntities);
+        const invisibleTrainIds = await checkForTrainPairs(activeTrainEntities);
         const checkForTrainPairsTime = Date.now() - startTime;
 
         startTime = Date.now();
-        currentLedMap = await updateLEDMap(activeTrainEntities, currentLedMap);
+        await updateTrackedTrains(activeTrainEntities, invisibleTrainIds);
+        currentLedMap100 = await generateLedMap(currentLedMap100, trackedTrains);
+        currentLedMap110 = await generateLedMap(currentLedMap110, trackedTrains);
         const ledMapUpdateTime = Date.now() - startTime;
 
         lastSuccessfulFetchTimestamp = Date.now();
@@ -375,7 +381,12 @@ async function initializeServer() {
 
     app.get('/akl-ltm/100.json', (_req, res) => {
         if (!isDataReady(res)) return;
-        res.json(currentLedMap);
+        res.json(currentLedMap100);
+    });
+
+    app.get('/akl-ltm/110.json', (_req, res) => {
+        if (!isDataReady(res)) return;
+        res.json(currentLedMap110);
     });
 
     app.get('/trackedtrains', (_req, res) => {

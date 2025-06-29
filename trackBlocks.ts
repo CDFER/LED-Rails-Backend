@@ -188,10 +188,7 @@ const trainInBlock = (train: TrainInfo, blockNumber: number): boolean => {
  * @param ledMap LED map object to be updated
  * @returns Promise resolving to updated LED map
  */
-export async function updateLEDMap(
-    gtfsTrains: Entity[],
-    ledMap: LEDMapUpdate
-): Promise<LEDMapUpdate> {
+export async function updateTrackedTrains(gtfsTrains: Entity[], invisibleTrainIds: string[] = []): Promise<void> {
     // Mirror gtfsTrains to trackedTrains
     gtfsTrains.forEach(train => {
         const existing = trackedTrains.find(t => t.trainId === train.id);
@@ -229,6 +226,7 @@ export async function updateLEDMap(
 
     trackedTrains
         .filter(train => train.position.latitude != 0 && train.position.longitude != 0) // Filter out trains with invalid positions
+        .filter(train => !invisibleTrainIds.includes(train.trainId)) // Filter out invisible trains
         .forEach(train => {
             if (train.currentBlock && trainInBlock(train, train.currentBlock)) {
                 // Train is still in the same block, no need to update
@@ -260,7 +258,6 @@ export async function updateLEDMap(
     if (process.env.NODE_ENV === 'development') {
         await fs.writeFile('cache/trackedTrains.json', JSON.stringify(trackedTrains, null, 2));
     }
-    return generateLedMap(ledMap, trackedTrains);
 }
 
 /**
@@ -269,7 +266,7 @@ export async function updateLEDMap(
  * @param ledMapUpdate The LEDMap object to update.
  * @returns The mutated LEDMap object with updated LED statuses.
  */
-function generateLedMap(ledMapUpdate: LEDMapUpdate, trackedTrains: TrainInfo[]): LEDMapUpdate {
+export function generateLedMap(ledMapUpdate: LEDMapUpdate, trackedTrains: TrainInfo[]): LEDMapUpdate {
     ledMapUpdate.updates = [];
 
     const now = Math.floor(Date.now() / 1000);
@@ -290,6 +287,19 @@ function generateLedMap(ledMapUpdate: LEDMapUpdate, trackedTrains: TrainInfo[]):
                 // }
             }
         });
+
+    if (ledMapUpdate.version == "100") {
+        // Decrement block numbers for to be compatible with the new track block numbering
+        ledMapUpdate.updates = ledMapUpdate.updates.map(update => {
+            const newB = update.b.map(blockNum => {
+                if ((blockNum >= 304 && blockNum <= 344) || (blockNum >= 138 && blockNum <= 208)) {
+                    return blockNum - 1;
+                }
+                return blockNum;
+            });
+            return { ...update, b: newB };
+        });
+    }
 
     ledMapUpdate.timestamp = now;
     return ledMapUpdate;

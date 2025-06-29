@@ -95,11 +95,11 @@ function getErrorMessage(error: unknown): string {
 /**
  * Checks for train pairs, updates existing ones, and identifies new ones.
  * @param rawTrains Full list of currently active train entities from the feed.
- * @param log Custom logging function.
+ * @returns List of vehicle IDs for trains that are part of a pair ("invisible" trains)
  */
-export async function checkForTrainPairs(rawTrains: Entity[]): Promise<Entity[]> {
+export async function checkForTrainPairs(rawTrains: Entity[]): Promise<string[]> {
     previousTrainPairs = [...trainPairs]; // Store previous pairs for comparison
-    let returnedTrains = rawTrains; // Copy of rawTrains to return at the end
+    let invisibleTrainIds: string[] = [];
 
     // 1. Update and remove existing pairs if the distance criteria is breached
     trainPairs.forEach(trainPair => {
@@ -131,7 +131,6 @@ export async function checkForTrainPairs(rawTrains: Entity[]): Promise<Entity[]>
             const posA = trainAEntity.vehicle!.position!;
             const posB = trainBEntity.vehicle!.position!;
 
-            // if (!posA.latitude || !posA.longitude || !posB.latitude || !posB.longitude) continue; // Skip if coordinates are missing
             if (!trainAEntity.vehicle?.timestamp || !trainBEntity.vehicle?.timestamp) continue; // Skip if timestamps are missing
 
             let distance = calculateDistance(posA.latitude!, posA.longitude!, posB.latitude!, posB.longitude!); // Calculate distance between the two trains
@@ -176,8 +175,6 @@ export async function checkForTrainPairs(rawTrains: Entity[]): Promise<Entity[]>
         }
     }
 
-
-
     // 3. Save the updated train pairs to cache
     if (trainPairs.length != previousTrainPairs.length) {
         const added = trainPairs.filter(np => !previousTrainPairs.some(op => op.pairKey === np.pairKey)).length;
@@ -186,12 +183,15 @@ export async function checkForTrainPairs(rawTrains: Entity[]): Promise<Entity[]>
         await saveTrainPairsToCache();
     }
 
-    // 4. Filter out trains that are part of a pair from the returnedTrains
+    // 4. Collect vehicle IDs of trains that are part of a pair (invisible trains)
     trainPairs.forEach(pair => {
         const [idA, idB] = pair.vehicleIds;
-        const routeA = returnedTrains.find(train => train.vehicle?.vehicle?.id === idA)?.vehicle?.trip?.route_id;
-        if (routeA) { returnedTrains = returnedTrains.filter(train => train.vehicle?.vehicle?.id !== idB) }
-        else { returnedTrains = returnedTrains.filter(train => train.vehicle?.vehicle?.id !== idA) };
+        const routeA = rawTrains.find(train => train.vehicle?.vehicle?.id === idA)?.vehicle?.trip?.route_id;
+        if (routeA == "") { invisibleTrainIds.push(idA) }
+        else { invisibleTrainIds.push(idB) };
     });
-    return returnedTrains;
+
+    // Remove duplicates
+    invisibleTrainIds = Array.from(new Set(invisibleTrainIds));
+    return invisibleTrainIds;
 }

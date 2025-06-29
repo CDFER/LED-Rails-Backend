@@ -196,6 +196,21 @@
             });
         }
 
+        // Helper to generate popup content for a vehicle
+        function getVehiclePopupContent(vehicleInfo, vehicleId, trip, direction, latitude, longitude, position, vehicleData) {
+            return `
+                <b>Label:</b> ${vehicleInfo?.label}<br>
+                <b>Vehicle ID:</b> ${vehicleId}<br>
+                ${trip?.route_id ? `<b>Route:</b> ${trip.route_id + direction}<br>` : ''}
+                <b>Lat:</b> ${latitude.toFixed(5)}<br>
+                <b>Lon:</b> ${longitude.toFixed(5)}<br>
+                <b>Bearing:</b> ${position.bearing ? `${position.bearing}` : ''}°<br>
+                <b>Speed:</b> ${(position.speed * 3.6).toFixed(0)}km/h<br>
+                ${position.odometer ? `<b>Odometer:</b> ${Number((position.odometer / 1000).toFixed(0)).toLocaleString('en-NZ')} km<br>` : ''}
+                ${vehicleData.timestamp ? `<b>Last Update:</b> ${getRelativeTime(vehicleData.timestamp * 1000)}` : ''}
+            `;
+        }
+
         async function fetchAndDisplayVehicles() {
             try {
                 const response = await fetch(API_ENDPOINT);
@@ -226,20 +241,11 @@
                             const marker = vehicleMarkers.get(vehicleId);
                             marker.setLatLng(latLng)
                                 .setIcon(icon);
+                            // Update popup content for existing marker
+                            marker.setPopupContent(getVehiclePopupContent(vehicleInfo, vehicleId, trip, direction, latitude, longitude, position, vehicleData));
                         } else {
-                            const popupContent = `
-                            <b>Label:</b> ${vehicleInfo?.label}<br>
-                            <b>Vehicle ID:</b> ${vehicleId}<br>
-                            ${trip?.route_id ? `<b>Route:</b> ${trip.route_id + direction}<br>` : ''}
-                            <b>Lat:</b> ${latitude.toFixed(5)}<br>
-                            <b>Lon:</b> ${longitude.toFixed(5)}<br>
-                            <b>Bearing:</b> ${position.bearing ? `${position.bearing}` : ''}°<br>
-                            <b>Speed:</b> ${(position.speed * 3.6).toFixed(0)}km/h<br>
-                            ${position.odometer ? `<b>Odometer:</b> ${Number((position.odometer / 1000).toFixed(0)).toLocaleString('en-NZ')} km<br>` : ''}
-                            ${vehicleData.timestamp ? `<b>Last Update:</b> ${getRelativeTime(vehicleData.timestamp * 1000)}` : ''}
-                        `;
                             const marker = L.marker(latLng, { icon })
-                                .bindPopup(popupContent)
+                                .bindPopup(getVehiclePopupContent(vehicleInfo, vehicleId, trip, direction, latitude, longitude, position, vehicleData))
                                 .addTo(map);
                             vehicleMarkers.set(vehicleId, marker);
                         }
