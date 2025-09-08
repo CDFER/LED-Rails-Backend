@@ -5,27 +5,17 @@ import rateLimit from 'express-rate-limit';
 import { promises as fs } from 'fs';
 import path from 'path';
 
-import { LOG_LABELS, log } from './customUtils';
+import { LOG_LABELS, log, safeParseInt } from './customUtils';
 
 import { RailNetwork } from './railNetwork';
 
+const PORT = 3000;
+
 // --- Configuration Loading ---
 loadEnv(); // Load environment variables from .env file
-
-// Helper for safely parsing environment variables
-function safeParseInt(value: string | undefined, defaultValue: number): number {
-    if (value === undefined) return defaultValue;
-    const parsed = parseInt(value, 10);
-    return isNaN(parsed) || parsed < 0 ? defaultValue : parsed;
-}
-
-const SERVER_CONFIG = {
-    port: safeParseInt(process.env.PORT, 3000),
-};
-
 const DOWNSTREAM_RATE_LIMIT_CONFIG = {
-    windowMs: safeParseInt(process.env.RATE_LIMIT_WINDOW_MS, 60000),
-    maxRequests: safeParseInt(process.env.RATE_LIMIT_MAX, 20),
+    windowMs: safeParseInt(process.env.RATE_LIMIT_WINDOW_MS, 60 * 1000), // 1 minute
+    maxRequests: safeParseInt(process.env.RATE_LIMIT_MAX, 20), // Limit each IP to 20 requests per `window`
 };
 
 // --- Express Setup ---
@@ -33,7 +23,7 @@ const app = express();
 
 const rateLimiter = rateLimit({
     windowMs: DOWNSTREAM_RATE_LIMIT_CONFIG.windowMs,
-    max: DOWNSTREAM_RATE_LIMIT_CONFIG.maxRequests,
+    limit: DOWNSTREAM_RATE_LIMIT_CONFIG.maxRequests,
     standardHeaders: false,
     legacyHeaders: false,
     message: {
@@ -151,9 +141,9 @@ async function initializeServer() {
         res.type('text/plain').send('LED-Rails Backend Server is operational.');
     });
 
-    app.listen(SERVER_CONFIG.port, () => {
+    app.listen(PORT, () => {
         log(LOG_LABELS.SERVER, 'Started', {
-            port: SERVER_CONFIG.port,
+            port: PORT,
             startup: (process.uptime() * 1000).toFixed(0) + 'ms',
         });
     });

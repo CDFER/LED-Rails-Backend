@@ -70,3 +70,16 @@ function getPrecisionTimestamp(): string {
     const milliseconds = d.getMilliseconds().toString().padStart(3, '0');
     return `${hours}:${minutes}:${seconds}.${milliseconds}`;
 }
+
+/**
+ * Safely parses a string to an integer.
+ *
+ * @param value - The string value to parse
+ * @param defaultValue - The value to return if parsing fails or input is invalid
+ * @returns The parsed integer, or the default value if input is invalid
+ */
+export function safeParseInt(value: string | undefined, defaultValue: number): number {
+    if (value === undefined) return defaultValue;
+    const parsed = parseInt(value, 10);
+    return isNaN(parsed) || parsed < 0 ? defaultValue : parsed;
+}
