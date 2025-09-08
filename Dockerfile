@@ -1,5 +1,5 @@
 # Dockerfile
-FROM oven/bun:1.2.5-alpine AS base
+FROM oven/bun:1.2.21-alpine AS base
 WORKDIR /usr/src/app
 
 # install dependencies into temp directory
@@ -26,11 +26,7 @@ COPY . .
 FROM base AS release
 WORKDIR /usr/src/app
 COPY --from=install /temp/prod/node_modules node_modules
-COPY --from=prerelease /usr/src/app/server.ts .
-COPY --from=prerelease /usr/src/app/package.json .
-COPY --from=prerelease /usr/src/app/trackBlocks.ts .
-COPY --from=prerelease /usr/src/app/trackBlocks.kml .
-COPY --from=prerelease /usr/src/app/trainPairs.ts .
+COPY --from=prerelease /usr/src/app .
 
 # run the app
 USER root
