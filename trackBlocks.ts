@@ -1,60 +1,64 @@
-import { promises as fs } from 'fs';
+import * as fs from 'fs';
 import { DOMParser } from '@xmldom/xmldom';
 import type { Entity } from 'gtfs-types';
+import { LOG_LABELS, log } from './customUtils';
 
-// --- Interfaces ---
-export interface LEDUpdate {
-    b: number[]; // [Pre, Post] update track block number (e.g., 302)
-    c: number; // Color ID
-    t: number; // Offset time from timestamp in seconds
+export interface LEDRailsAPI {
+    routeToColorId: Record<string, number>; // Map of route names to color IDs
+    url: string; // URL of the LED Rails API endpoint e.g. "/akl-ltm/100.json"
+    blockRemap: Array<{
+        start: number; // Start block number for remapping (inclusive)
+        end: number;  // End block number for remapping (inclusive)
+        offset: number; // Offset to apply for remapping e.g. 302 with offset -1 becomes 301
+    }> | undefined; // Optional remapping of block numbers for this board revision
+    displayThreshold: number; // Time in seconds to display trains after their last update
+    randomizeTimeOffset: boolean; // Whether to randomize time offsets for LED updates
+    updateInterval: number; // Interval in seconds between updates
+    output: LEDRailsAPIOutput; // The prepared output to send to the LED Rails API
 }
 
-export interface LEDMapUpdate {
-    version: string;                    // Intended Version of the Board (e.g. V1.0.0)
+interface LEDRailsAPIOutput {
+    version: string;                    // Intended Version of the Board (e.g. "100" for V1.0.0)
     timestamp: number;                  // Epoch Seconds timestamp of this update
     update: number;                     // Offset time from timestamp for next update
     colors: Record<number, number[]>;   // Map color Id to [R,G,B]
     updates: LEDUpdate[];               // Map block number to LEDUpdate
 }
 
+interface LEDUpdate {
+    b: number[]; // [Pre, Post] update track block number (e.g., 302)
+    c: number; // Color ID
+    t: number; // Offset time from timestamp in seconds
+}
+
 interface TrackBlock {
     blockNumber: number;                // Track block number (ref from pcb) (e.g., D302 is 302)
-    altBlockNumber: number | undefined; // Alternative block number if applicable (for platforms 3/4)
+    altBlock: number | undefined;       // Alternative block number if applicable (for platforms 3/4)
     name: string;                       // Name of the KML Placemark (e.g. "302 - Parnell")
-    priority: boolean;                  // Indicates if this block is a high priority block (e.g. stations)
+    priority: boolean;                  // Indicates if trains should be put in this block first when blocks overlap
     polygon: Array<[number, number]>;   // Array of [latitude, longitude] tuples
+    routes: string[] | undefined;       // Allowed routes for this block, parsed from [ROUTE1,ROUTE2]
 }
 
-interface TrainInfo {
+export type TrackBlockMap = Map<number, TrackBlock>;
+
+export interface TrainInfo {
     trainId: string; // Vehicle ID from GTFS e.g. "59185" for AMP185
-    position: { latitude: number; longitude: number; timestamp: number; speed: number }; // GTFS Position update of the train
-    currentBlock?: number | undefined; // Track block number (e.g., 301)
-    previousBlock?: number | undefined; // Previous block number (e.g., 300)
-    colorId: number; // Converted using ROUTE_TO_COLOR_ID_MAP
+    position: { latitude: number; longitude: number; timestamp: number; speed: number | undefined }; // GTFS Position update of the train
+    currentBlock: number | undefined; // Track block number (e.g., 301)
+    previousBlock: number | undefined; // Previous block number (e.g., 300)
+    route: string; // Route ID from GTFS e.g. "EAST-201"
 }
 
-// --- Configuration ---
-
-// Defines mapping from GTFS route_id to a numeric color identifier for the LED map
-const ROUTE_TO_COLOR_ID_MAP: Record<string, number> = {
-    'WEST-201': 2,
-    'EAST-201': 3,
-    'ONE-201': 4,
-    'STH-201': 5,
-};
-const OUT_OF_SERVICE_COLOR_ID = 1; // Default color for out of service trains
-
-const DISPLAY_THRESHOLD = 180; // 3 minutes in seconds
-const UPDATE_INTERVAL = 20; // Update interval in seconds
-
-
-// Module-level state for currently occupied blocks by trains
-const trackBlocks = new Map<number, TrackBlock>(); // Map<blockNumber, TrackBlock>
-export const trackedTrains: TrainInfo[] = [];
-
-// --- KML Parsing ---
-export async function loadTrackBlocks(filePath: string) {
-    const kmlContent = await fs.readFile(filePath, 'utf-8');
+/**
+ * Loads track blocks from a KML file and parses them into a TrackBlockMap.
+ *
+ * @param cityID City identifier (e.g., 'AKL', 'WLG')
+ * @param filePath Path to the KML file
+ * @returns Map of block numbers to TrackBlock objects
+ */
+export function loadTrackBlocks(cityID: string, filePath: string) {
+    const kmlContent = fs.readFileSync(filePath, 'utf-8');
     const doc = new DOMParser().parseFromString(kmlContent, 'text/xml');
     const loadedBlocks: TrackBlock[] = [];
     const placemarks = doc.getElementsByTagName('Placemark');
@@ -65,30 +69,42 @@ export async function loadTrackBlocks(filePath: string) {
 
         // Skip placemarks without a name
         if (!id) {
-            console.warn('Placemark without a name found, skipping.');
+            log(cityID, 'trackblock.kml Placemark without a name found, skipping.');
             continue;
         }
 
         // Extracts the first sequence of digits from the ID to use as the block number.
-        const blockNumberMatch = id.match(/(\d+)/);
+        let priority = false;
         let blockNumber: number;
-        let altBlockNumber: number | undefined;
+        let altBlock: number | undefined;
+        let routes: string[] | undefined;
 
+        const blockNumberMatch = id.match(/(\d+)/);
         if (blockNumberMatch && blockNumberMatch[1]) {
             blockNumber = parseInt(blockNumberMatch[1], 10);
         } else {
-            // This fallback is primarily for IDs that do not contain any digits.
-            console.warn(`ID does not contain a numeric block number: ${id}`);
+            log(cityID, `trackblock.kml polygon does not contain a block number: ${id}`);
             continue;
         }
 
-        const altBlockNumberMatch = id.match(/\+(\d+)/);
-        if (altBlockNumberMatch && altBlockNumberMatch[1]) {
-            altBlockNumber = parseInt(altBlockNumberMatch[1], 10);
+        // Parse altBlock from +N in the id string (e.g., "+402" means altBlock is 402)
+        const altBlockMatch = id.match(/\+(\d+)/);
+        if (altBlockMatch && altBlockMatch[1]) {
+            altBlock = parseInt(altBlockMatch[1], 10);
         }
 
-        const mainIdPart = id.split('+')[0] || ''; // Ensure mainIdPart is always a string
-        const priority = /[a-zA-Z]/.test(mainIdPart); // Check priority on the main block ID part
+        // Parse routes from "[ROUTE1,ROUTE2]" at the end of the id string
+        const routesMatch = id.match(/\[([^\]]+)\]/);
+        if (routesMatch && routesMatch[1]) {
+            routes = routesMatch[1].split(',').map(s => s.trim()).filter(Boolean);
+        }
+
+        // Parse priority from presence of a group of letters (>=3) anywhere in the ID
+        const nameMatch = id.match(/[a-zA-Z]{3,}/);
+        if (nameMatch) {
+            priority = true;
+        }
+
         const coordinatesElement = placemark.getElementsByTagName('coordinates')[0];
         const coordsString = coordinatesElement?.textContent?.trim();
 
@@ -105,39 +121,47 @@ export async function loadTrackBlocks(filePath: string) {
                 loadedBlocks.push({
                     name: id,
                     blockNumber,
-                    altBlockNumber,
+                    altBlock,
                     priority,
-                    polygon: points
+                    polygon: points,
+                    routes,
                 });
             } else {
-                console.warn(`Placemark '${id}' had no valid coordinates`);
+                log(cityID, `trackblock.kml Placemark '${id}' had no valid coordinates`);
             }
         } else {
-            console.warn(`Placemark '${id}' missing coordinates`);
+            log(cityID, `trackblock.kml Placemark '${id}' missing coordinates`);
         }
     }
 
     // Clear existing map and add sorted blocks
-    trackBlocks.clear();
+    const trackBlocks: TrackBlockMap = new Map<number, TrackBlock>(); // Map<blockNumber, TrackBlock>
     loadedBlocks
-        .sort((a, b) => Number(b.priority) - Number(a.priority)) // Priority first
+        // Blocks with routes first, then priority, then the rest
+        .sort((a, b) => {
+            // Routes first
+            if (a.routes && !b.routes) return -1;
+            if (!a.routes && b.routes) return 1;
+            // Priority next
+            if (a.priority && !b.priority) return -1;
+            if (!a.priority && b.priority) return 1;
+            // Otherwise, keep original order
+            return 0;
+        })
         .forEach(block => {
             trackBlocks.set(block.blockNumber, block);
         });
 
-    // Only save track blocks when in dev environment (.env contains NODE_ENV=development)
-    if (process.env.NODE_ENV === 'development') {
-        fs.writeFile('cache/trackBlocks.json', JSON.stringify(Array.from(trackBlocks), null, 2));
-    }
     return trackBlocks;
 }
 
 /**
  * Checks if a point is inside a polygon using the Ray Casting algorithm.
- * @param pointLat Latitude of the point to check.
- * @param pointLng Longitude of the point to check.
- * @param polygon Array of [lat, lng] tuples defining the polygon vertices.
- * @returns True if the point is inside the polygon, false otherwise.
+ *
+ * @param pointLat Latitude of the point to check
+ * @param pointLng Longitude of the point to check
+ * @param polygon Array of [lat, lng] tuples defining the polygon vertices
+ * @returns True if the point is inside the polygon, false otherwise
  */
 function isPointInPolygon(pointLat: number, pointLng: number, polygon: Array<[number, number]>): boolean {
     if (!polygon || polygon.length < 3) {
@@ -148,10 +172,13 @@ function isPointInPolygon(pointLat: number, pointLng: number, polygon: Array<[nu
     let isInside = false;
 
     for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-        const lat_i = polygon[i][0];
-        const lng_i = polygon[i][1];
-        const lat_j = polygon[j][0];
-        const lng_j = polygon[j][1];
+        const pi = polygon[i];
+        const pj = polygon[j];
+        if (!pi || !pj) continue;
+        const lat_i = pi[0];
+        const lng_i = pi[1];
+        const lat_j = pj[0];
+        const lng_j = pj[1];
 
         // Check if the point's latitude is between the latitudes of the edge's endpoints
         const isLatBetweenEdgePoints = (lat_i > pointLat) !== (lat_j > pointLat);
@@ -169,131 +196,306 @@ function isPointInPolygon(pointLat: number, pointLng: number, polygon: Array<[nu
 }
 
 /**
- * Processes a train entity to check if it occupies a specific track block polygon.
- * @param train Train with position data
- * @param blockNumber Track block number to check against
+ * Checks if a train is within a specific track block polygon.
+ *
+ * @param trackBlocks Map of track blocks
+ * @param train Train information
+ * @param blockNumber Track block number to check
  * @returns True if the train is within the block's polygon, false otherwise
  */
-const trainInBlock = (train: TrainInfo, blockNumber: number): boolean => {
+const trainInBlock = (trackBlocks: TrackBlockMap, train: TrainInfo, blockNumber: number): boolean => {
     const block = trackBlocks.get(blockNumber);
     if (block) {
-        return isPointInPolygon(train.position.latitude, train.position.longitude, block.polygon);
+        // If block routes are defined, check if the train's route is allowed in this block
+        if (block.routes && !block.routes.includes(train.route)) {
+            return false;
+        } else {
+            return isPointInPolygon(train.position.latitude, train.position.longitude, block.polygon);
+        }
     }
     return false;
 };
 
 /**
- * Updates LED map state based on train positions within track block polygons
- * @param gtfsTrains Array of train entities with position data
- * @param ledMap LED map object to be updated
- * @returns Promise resolving to updated LED map
+ * Updates tracked train information based on current GTFS train positions.
+ *
+ * Synchronizes train data between GTFS feeds and internal tracking,
+ * updates train positions, and determines which track block each train occupies.
+ *
+ * @param trackBlocks Map of track blocks with polygon boundary data
+ * @param trackedTrains Current array of tracked train information
+ * @param gtfsTrains Array of train entities from GTFS real-time feed
+ * @param displayThreshold Time in seconds to display trains after their last update
+ * @param invisibleTrainIds List of train IDs that should be hidden
+ * @returns Updated array of tracked trains with current positions and block assignments
  */
-export async function updateTrackedTrains(gtfsTrains: Entity[]): Promise<void> {
-    // Mirror gtfsTrains to trackedTrains
-    gtfsTrains.forEach(train => {
-        const existing = trackedTrains.find(t => t.trainId === train.id);
-        if (existing) {
-            // Update existing train position
-            if (train.vehicle?.position?.speed == 0 && existing.position.speed == 0) {
-                // If the train is stopped, average its position with the existing one
-                existing.position.latitude = (existing.position.latitude * 0.9 + (train.vehicle?.position?.latitude ?? 0) * 0.1);
-                existing.position.longitude = (existing.position.longitude * 0.9 + (train.vehicle?.position?.longitude ?? 0) * 0.1);
-            } else {
-                existing.position.latitude = train.vehicle?.position?.latitude ?? 0;
-                existing.position.longitude = train.vehicle?.position?.longitude ?? 0;
-            }
-            existing.position.speed = train.vehicle?.position?.speed ?? 0;
-            existing.position.timestamp = train.vehicle?.timestamp ?? 0;
-            existing.colorId = ROUTE_TO_COLOR_ID_MAP[train.vehicle?.trip?.route_id ?? ''] ?? OUT_OF_SERVICE_COLOR_ID;
+export function updateTrackedTrains(
+    trackBlocks: TrackBlockMap,
+    trackedTrains: TrainInfo[],
+    gtfsTrains: Entity[],
+    displayThreshold: number,
+    invisibleTrainIds: string[],
+    cityID: string
+): TrainInfo[] {
+
+    // Synchronize GTFS train data with our tracked trains
+    syncTrainData(trackedTrains, gtfsTrains);
+
+    // Update track block assignments for all trains with valid positions
+    assignBlocksToTrains(trackBlocks, trackedTrains, displayThreshold, invisibleTrainIds, cityID);
+
+    return trackedTrains;
+}
+
+/**
+ * Synchronizes train data between GTFS feed and internal tracking.
+ *
+ * @param trackedTrains Array of tracked train information
+ * @param gtfsTrains Array of train entities from GTFS real-time feed
+ */
+function syncTrainData(trackedTrains: TrainInfo[], gtfsTrains: Entity[]): void {
+    gtfsTrains.forEach(gtfsTrain => {
+        const trainId = gtfsTrain.vehicle?.vehicle?.id ?? 'UNKNOWN';
+        const existingTrain = trackedTrains.find(t => t.trainId === trainId);
+
+        if (existingTrain) {
+            updateExistingTrainPosition(existingTrain, gtfsTrain);
         } else {
-            // Add new train
-            trackedTrains.push({
-                trainId: train.id,
-                position: {
-                    latitude: train.vehicle?.position?.latitude ?? 0,
-                    longitude: train.vehicle?.position?.longitude ?? 0,
-                    timestamp: train.vehicle?.timestamp ?? 0,
-                    speed: train.vehicle?.position?.speed ?? 0,
-                },
-                colorId: ROUTE_TO_COLOR_ID_MAP[train.vehicle?.trip?.route_id ?? ''] ?? OUT_OF_SERVICE_COLOR_ID,
-                currentBlock: undefined,
-                previousBlock: undefined,
-            });
+            addNewTrain(trackedTrains, gtfsTrain);
+        }
+    });
+}
+
+/**
+ * Updates position data for an existing tracked train.
+ *
+ * @param trackedTrain Tracked train to update
+ * @param gtfsTrain GTFS train entity with new position data
+ */
+function updateExistingTrainPosition(trackedTrain: TrainInfo, gtfsTrain: Entity): void {
+    const newPosition = gtfsTrain.vehicle?.position;
+    const newSpeed = newPosition?.speed;
+
+    if (newSpeed && newSpeed === 0 && trackedTrain.position.speed === 0) {
+        const SMOOTHING_FACTOR = 0.95;
+        trackedTrain.position.latitude = (
+            trackedTrain.position.latitude * SMOOTHING_FACTOR +
+            (newPosition?.latitude ?? 0) * (1 - SMOOTHING_FACTOR)
+        );
+        trackedTrain.position.longitude = (
+            trackedTrain.position.longitude * SMOOTHING_FACTOR +
+            (newPosition?.longitude ?? 0) * (1 - SMOOTHING_FACTOR)
+        );
+    } else {
+        trackedTrain.position.latitude = newPosition?.latitude ?? 0;
+        trackedTrain.position.longitude = newPosition?.longitude ?? 0;
+    }
+
+    // Update other position properties
+    trackedTrain.position.speed = newSpeed;
+    trackedTrain.position.timestamp = gtfsTrain.vehicle?.timestamp ?? 0;
+    trackedTrain.route = String(gtfsTrain.vehicle?.trip?.route_id ?? 'OUT-OF-SERVICE');
+}
+
+/**
+ * Adds a new train to the tracked trains array.
+ *
+ * @param trackedTrains Array of tracked train information
+ * @param gtfsTrain GTFS train entity to add
+ */
+function addNewTrain(trackedTrains: TrainInfo[], gtfsTrain: Entity): void {
+    const vehicle = gtfsTrain.vehicle;
+    const position = vehicle?.position;
+
+    trackedTrains.push({
+        trainId: vehicle?.vehicle?.id ?? 'UNKNOWN',
+        position: {
+            latitude: position?.latitude ?? 0,
+            longitude: position?.longitude ?? 0,
+            timestamp: vehicle?.timestamp ?? 0,
+            speed: position?.speed, // Can be undefined (e.g. WLG does not provide speed)
+        },
+        route: String(vehicle?.trip?.route_id ?? 'OUT-OF-SERVICE'),
+        currentBlock: undefined,
+        previousBlock: undefined,
+    });
+}
+
+/**
+ * Assigns track blocks to all trains based on their current positions.
+ *
+ * @param trackBlocks Map of track blocks
+ * @param trackedTrains Array of tracked train information
+ * @param displayThreshold Time in seconds to display trains after their last update
+ * @param invisibleTrainIds List of train IDs that should be hidden
+ */
+function assignBlocksToTrains(trackBlocks: TrackBlockMap, trackedTrains: TrainInfo[], displayThreshold: number, invisibleTrainIds: string[], cityID: string): void {
+    const now = Math.ceil(Date.now() / 1000);
+    const displayCutoff = now - displayThreshold;
+
+    // Filter out trains with outdated timestamps or invalid positions
+    const validTrains: TrainInfo[] = [];
+    trackedTrains.forEach(train => {
+        if (
+            train.position.latitude == 0 &&
+            train.position.longitude == 0 ||
+            train.position.timestamp < displayCutoff
+        ) {
+            train.currentBlock = undefined;
+            train.previousBlock = undefined;
+        } else {
+            validTrains.push(train);
         }
     });
 
-    const occupiedBlocks = new Set<number>();
+    validTrains.forEach(train => {
+        // Skip if train is still in the same block
+        if (train.currentBlock && trainInBlock(trackBlocks, train, train.currentBlock)) {
+            train.previousBlock = train.currentBlock;
+            return;
+        }
 
-    trackedTrains
-        .filter(train => train.position.latitude != 0 && train.position.longitude != 0) // Filter out trains with invalid positions
-        .forEach(train => {
-            if (train.currentBlock && trainInBlock(train, train.currentBlock)) {
-                // Train is still in the same block, no need to update
+        // Find and set the block the train occupies
+        findAndSetTrainBlock(trackBlocks, train, cityID);
+    });
+
+    updateAltBlocks(trackBlocks, trackedTrains, invisibleTrainIds, cityID);
+}
+
+/**
+ * Finds and sets the track block for a single train based on its position.
+ *
+ * @param trackBlocks Map of track blocks
+ * @param train Train information
+ * @param cityID City identifier (for logging)
+ */
+function findAndSetTrainBlock(trackBlocks: TrackBlockMap, train: TrainInfo, cityID: string): void {
+
+    // TODO: Optimize this search by checking nearby blocks first
+    for (const block of trackBlocks.values()) {
+        if (trainInBlock(trackBlocks, train, block.blockNumber)) {
+            if (train.previousBlock) {
                 train.previousBlock = train.currentBlock;
-                occupiedBlocks.add(train.currentBlock);
             } else {
-                // Current Block invalid, find the new block it occupies 
-                // TODO: Optimize this search by checking nearby blocks first
-                for (const block of trackBlocks.values()) {
-                    if (trainInBlock(train, block.blockNumber)) {
-                        if (train.currentBlock) { train.previousBlock = train.currentBlock } else { train.previousBlock = block.blockNumber; }
-
-                        if (occupiedBlocks.has(block.blockNumber) && block.altBlockNumber && !occupiedBlocks.has(block.altBlockNumber)) {
-                            train.currentBlock = block.altBlockNumber; // Use alternative block if already occupied
-                        } else {
-                            train.currentBlock = block.blockNumber;
-                        }
-                        occupiedBlocks.add(train.currentBlock);
-                        break; // Found the block, no need to check further
-                    }
-                }
-
-                if (!train.currentBlock) {
-                    console.warn(`Train ${train.trainId} is not in any block (${train.position.latitude}, ${train.position.longitude})`);
-                }
+                train.previousBlock = 0; // Set previousBlock if not already set
             }
-        });
+            train.currentBlock = block.blockNumber;
+            return;
+        }
+    }
 
+    // Train is not in any known block
+    train.currentBlock = undefined;
+    train.previousBlock = undefined;
+
+    // Only log if in the dev environment
     if (process.env.NODE_ENV === 'development') {
-        await fs.writeFile('cache/trackedTrains.json', JSON.stringify(trackedTrains, null, 2));
+        if (train.trainId != "4396" && train.trainId != "4081" && train.trainId != "4398") { // Ignore known outliers (WLG Wairarapa Connection)
+            log(cityID, `Train ${train.trainId} on ${train.route} is not in any block (${train.position.latitude}, ${train.position.longitude})`, LOG_LABELS.WARNING);
+        }
     }
 }
 
 /**
- * Generates the LED status for each bus in the LED map based on `currentOccupiedBlocks`.
- * This function mutates the input `ledMap`.
- * @param ledMapUpdate The LEDMap object to update.
- * @returns The mutated LEDMap object with updated LED statuses.
+ * Updates alternative block assignments for trains when multiple trains occupy the same block.
+ *
+ * @param trackBlocks Map of track blocks
+ * @param trackedTrains Array of tracked train information
+ * @param invisibleTrainIds List of train IDs that should be hidden
+ * @param cityID City identifier (for logging)
  */
-export function generateLedMap(ledMapUpdate: LEDMapUpdate, trackedTrains: TrainInfo[], invisibleTrainIds: string[] = []): LEDMapUpdate {
-    ledMapUpdate.updates = [];
+function updateAltBlocks(trackBlocks: TrackBlockMap, trackedTrains: TrainInfo[], invisibleTrainIds: string[], cityID: string) {
 
-    const now = Math.floor(Date.now() / 1000);
-    const displayCutoff = now - DISPLAY_THRESHOLD;
-    const updateTime = now - UPDATE_INTERVAL;
+    // Sort out multiple trains in the same block by sorting and moving to the altBlockNumber if available
+    for (const block of trackBlocks.values()) {
+        const trainsInBlock = trackedTrains
+            .filter(train => train.currentBlock === block.blockNumber)
+            .filter(train => !invisibleTrainIds.includes(train.trainId))
+        if (trainsInBlock.length > 1) {
+            // Sort trains by route and make sure "OUT-OF-SERVICE" is last
+            trainsInBlock.sort((a, b) => {
+                if (a.route === 'OUT-OF-SERVICE' && b.route !== 'OUT-OF-SERVICE') return 1;
+                if (a.route !== 'OUT-OF-SERVICE' && b.route === 'OUT-OF-SERVICE') return -1;
+                return a.route.localeCompare(b.route);
+            });
 
+            for (let i = 0; i < trainsInBlock.length; i++) {
+                const train = trainsInBlock[i];
+                if (!train) continue;
+                if (i === 0) {
+                    train.currentBlock = block.blockNumber; // First train stays in the main block
+                } else if (block.altBlock && i === 1) {
+                    train.currentBlock = block.altBlock;    // Second train moves to alt block if available
+                } else {
+                    if (train.trainId) {
+                        invisibleTrainIds.push(train.trainId);  // Remaining trains are marked as invisible
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Generates an api output based on the current train block assignments.
+ *
+ * This function mutates the input LEDRailsAPI object.
+ *
+ * @param api LEDRailsAPI configuration and output object
+ * @param trackedTrains Array of tracked train information
+ * @param invisibleTrainIds List of train IDs that should be hidden
+ * @returns The mutated LEDRailsAPI object with updated LED statuses
+ */
+export function generateLedMap(api: LEDRailsAPI, trackedTrains: TrainInfo[], invisibleTrainIds: string[]): LEDRailsAPI {
+    // Reset updates for this output
+    api.output.updates = [];
+
+    // Calculate time thresholds for display and update
+    const now = Math.ceil(Date.now() / 1000);
+    const displayCutoff = now - api.displayThreshold;
+    const updateTime = now - api.updateInterval;
+
+    // Iterate over trains that should be displayed
     trackedTrains
-        .filter(train => train.position.timestamp >= displayCutoff)
-        .filter(train => !invisibleTrainIds.includes(train.trainId)) // Filter out invisible trains
+        .filter(train => train.position.timestamp >= displayCutoff) // Only show trains with recent updates
+        .filter(train => !invisibleTrainIds.includes(train.trainId)) // Exclude invisible trains (e.g. paired trains)
         .forEach(train => {
-            if (train.currentBlock && train.previousBlock) {
-                ledMapUpdate.updates.push({
-                    b: [train.previousBlock, train.currentBlock],
-                    c: train.colorId,
-                    t: Math.max(train.position.timestamp - updateTime, 0),
-                });
-                // if (train.currentBlock !== train.previousBlock) {
-                //     console.log(`Train ${train.trainId} moved from block ${train.previousBlock} to ${train.currentBlock}`);
-                // }
+            // Only update if both current and previous block are known
+            if (train.currentBlock !== undefined && train.previousBlock !== undefined) {
+                const colorId = api.routeToColorId[train.route]; // Get color for this route
+                if (colorId != undefined) {
+                    let timeOffset = 0;
+                    // Determine time offset for LED animation
+                    if (api.randomizeTimeOffset) {
+                        if (train.previousBlock === train.currentBlock) {
+                            timeOffset = 0; // No movement, no offset
+                        } else {
+                            timeOffset = Math.floor(Math.random() * (api.updateInterval - 1)) + 1; // Random offset
+                        }
+                    } else {
+                        timeOffset = Math.max(train.position.timestamp - updateTime, 0); // Use timestamp difference
+                    }
+
+                    // Add update for this train to the output
+                    api.output.updates.push({
+                        b: [train.previousBlock, train.currentBlock], // Block transition
+                        c: colorId, // Color ID
+                        t: timeOffset, // Time offset for animation
+                    });
+                } else {
+                    log(LOG_LABELS.ERROR, `No color mapping for route ${train.route}`);
+                }
             }
         });
 
-    if (ledMapUpdate.version == "100") {
-        // Decrement block numbers for to be compatible with the new track block numbering
-        ledMapUpdate.updates = ledMapUpdate.updates.map(update => {
+    // Remap block numbers if required by board revision
+    if (api.blockRemap != undefined) {
+        api.output.updates = api.output.updates.map(update => {
             const newB = update.b.map(blockNum => {
-                if ((blockNum >= 304 && blockNum <= 344) || (blockNum >= 138 && blockNum <= 208)) {
-                    return blockNum - 1;
+                for (const rule of api.blockRemap!) {
+                    if (blockNum >= rule.start && blockNum <= rule.end) {
+                        return blockNum + rule.offset; // Apply remap offset
+                    }
                 }
                 return blockNum;
             });
@@ -301,6 +503,7 @@ export function generateLedMap(ledMapUpdate: LEDMapUpdate, trackedTrains: TrainI
         });
     }
 
-    ledMapUpdate.timestamp = now;
-    return ledMapUpdate;
+    // Set the output timestamp to now
+    api.output.timestamp = now;
+    return api;
 }

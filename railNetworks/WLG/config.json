@@ -1,0 +1,34 @@
+{
+  "GTFSRealtimeAPI": {
+    "url": "https://api.opendata.metlink.org.nz/v1/gtfs-rt/vehiclepositions",
+    "keyHeader": "x-api-key",
+    "fetchIntervalSeconds": 9,
+    "format": "FeedMessage"
+  },
+  "trainFilter": {
+    "trip_ID": {
+      "includes": "RAIL"
+    }
+  },
+  "processingOptions": {
+    "pairTrains": false,
+    "cacheGTFS": true,
+    "cacheIntervalSeconds": 258
+  },
+  "trackBlocks": {
+    "fileName": "trackBlocks.kml"
+  },
+  "LEDRailsAPI": {
+    "APIVersions": [{ "version": "100" }],
+    "displayThreshold": 60,
+    "randomizeTimeOffset": true,
+    "colors": {
+      "OUT-OF-SERVICE": [255, 0, 0],
+      "2": [159, 223, 0],
+      "3": [255, 96, 128],
+      "4": [255, 191, 0],
+      "5": [255, 96, 0],
+      "6": [0, 191, 191]
+    }
+  }
+}

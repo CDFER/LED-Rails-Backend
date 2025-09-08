@@ -1,25 +1,25 @@
-import { promises as fs } from 'fs';
-import path from 'path';
 import type { Entity } from 'gtfs-types';
 
 // --- Configuration for Pair Detection ---
-const PAIR_CONFIG = {
+const PAIR_CRITERIA = {
     minSpeed: 3, // Minimum speed in m/s to consider a train for pairing
-    maxDistance: 1000, // Maximum distance in meters to keeps trains as a pair
     maxSpeed: 35, // Maximum speed in m/s to consider
     trainLength: 72, // Train length in meters (used for distance calculations)
     maxSpeedDiff: 3, // Maximum speed difference in m/s to consider trains as a pair
     maxBearingDiff: 5, // Maximum bearing difference in degrees to consider trains as a pair
-    cacheFolder: path.join(__dirname, 'cache'),
 };
 
-const TRAIN_PAIRS_CACHE_FILE = path.join(PAIR_CONFIG.cacheFolder, 'train-pairs-cache.json');
+// --- Configuration for Breaking Pairs ---
+const NOT_PAIR_CRITERIA = {
+    maxDistance: 2000, // Maximum distance in meters to keep trains as a pair
+};
 
-interface TrainPair {
+export interface TrainPair {
     pairKey: string; // Unique key, e.g., "ID1-ID2" sorted
     vehicleIds: [string, string]; // IDs of the two trains in the pair
     detectedAt: string; // ISO timestamp when the pair was first detected
-    // Stores the criteria values that were met when the pair was detected
+
+    // Stores the criteria values that were met when the pair was detected (only for reference/debugging)
     metCriteria: {
         distanceMeters: number;
         speed: number; // Speed in m/s to get between the two train locations
@@ -31,10 +31,6 @@ interface TrainPair {
         location: [number, number][]; // The coordinates of the two trains as [latitude, longitude] tuples
     };
 }
-
-// Memory store for train pairs
-let previousTrainPairs: TrainPair[] = [];
-let trainPairs: TrainPair[] = [];
 
 /**
  * Calculates the distance in meters between two geographic coordinates using the Haversine formula.
@@ -61,44 +57,20 @@ function calculateBearingDifference(bearing1: number, bearing2: number): number 
 }
 
 /**
- * Loads train pairs from the cache file into trainPairs
- * Should be called once at server startup.
- */
-export async function loadTrainPairsFromCache(): Promise<number> {
-    try {
-        await fs.mkdir(PAIR_CONFIG.cacheFolder, { recursive: true }); // Ensure directory exists
-        const fileContent = await fs.readFile(TRAIN_PAIRS_CACHE_FILE, 'utf-8');
-        trainPairs = JSON.parse(fileContent) as TrainPair[];
-        return trainPairs.length;
-    } catch (error) {
-        console.warn(`Failed to load train pairs from cache: ${getErrorMessage(error)}`);
-        return 0; // Return 0 if loading fails
-    }
-}
-
-/**
- * Saves trainPairs to the cache file.
- */
-async function saveTrainPairsToCache() {
-    try {
-        await fs.mkdir(PAIR_CONFIG.cacheFolder, { recursive: true }); // Ensure directory exists
-        await fs.writeFile(TRAIN_PAIRS_CACHE_FILE, JSON.stringify(trainPairs, null, 2));
-    } catch (error) {
-        console.error(`Failed to save train pairs to cache: ${getErrorMessage(error)}`);
-    }
-}
-
-function getErrorMessage(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
-}
-
-/**
  * Checks for train pairs, updates existing ones, and identifies new ones.
- * @param rawTrains Full list of currently active train entities from the feed.
- * @returns List of vehicle IDs for trains that are part of a pair ("invisible" trains)
+ *
+ * This function:
+ * - Updates and removes existing pairs if the distance criteria is breached
+ * - Identifies new pairs from trains that are not part of an existing pair
+ * - Collects vehicle IDs of trains that are part of a pair ("invisible" trains)
+ *
+ * @param rawTrains - Full list of currently active train entities from the feed
+ * @param trainPairs - Existing list of train pairs to update
+ * @returns An object containing:
+ *   - invisibleTrainIds: List of vehicle IDs for trains that are part of a pair ("invisible" trains)
+ *   - trainPairs: Updated list of train pairs
  */
-export async function checkForTrainPairs(rawTrains: Entity[]): Promise<string[]> {
-    previousTrainPairs = [...trainPairs]; // Store previous pairs for comparison
+export async function checkForTrainPairs(rawTrains: Entity[], trainPairs: TrainPair[]): Promise<{ invisibleTrainIds: string[], trainPairs: TrainPair[] }> {
     let invisibleTrainIds: string[] = [];
 
     // 1. Update and remove existing pairs if the distance criteria is breached
@@ -109,8 +81,8 @@ export async function checkForTrainPairs(rawTrains: Entity[]): Promise<string[]>
         if (trainA?.position && trainB?.position && trainA.position?.latitude != 0 && trainB.position?.latitude != 0) {
             const distance = calculateDistance(trainA.position?.latitude, trainA.position?.longitude, trainB.position?.latitude, trainB.position?.longitude);
 
-            if (distance > PAIR_CONFIG.maxDistance) {
-                console.log(`Pair ${trainPair.pairKey} broken distance limit: ${distance.toFixed(0)}m @ ${[[trainA.position?.latitude.toFixed(5), trainA.position?.longitude.toFixed(5)], [trainB.position?.latitude.toFixed(5), trainB.position?.longitude.toFixed(5)]]}`);
+            if (distance > NOT_PAIR_CRITERIA.maxDistance) {
+                // console.log(`Pair ${trainPair.pairKey} broken distance limit: ${distance.toFixed(0)}m @ ${[[trainA.position?.latitude.toFixed(5), trainA.position?.longitude.toFixed(5)], [trainB.position?.latitude.toFixed(5), trainB.position?.longitude.toFixed(5)]]}`);
                 trainPairs = trainPairs.filter(pair => pair.pairKey !== trainPair.pairKey); // Remove pair if distance criteria is breached
             }
         }
@@ -119,7 +91,7 @@ export async function checkForTrainPairs(rawTrains: Entity[]): Promise<string[]>
 
     // 2. Identify new pairs from trains that are not part of an existing pair
     const timeNow = Date.now() / 1000; // Current time in seconds since epoch
-    rawTrains = rawTrains.filter(train => train.vehicle?.position?.speed && train.vehicle?.position?.speed >= PAIR_CONFIG.minSpeed); // Filter out trains below minimum speed
+    rawTrains = rawTrains.filter(train => train.vehicle?.position?.speed && train.vehicle?.position?.speed >= PAIR_CRITERIA.minSpeed); // Filter out trains below minimum speed
     rawTrains = rawTrains.filter(train => train.vehicle?.position?.latitude && train.vehicle?.position?.longitude); // Filter out trains without coordinates
     rawTrains = rawTrains.filter(train => train.vehicle?.timestamp && train.vehicle?.timestamp >= timeNow - 30); // Filter out trains older than 30 seconds
 
@@ -134,18 +106,18 @@ export async function checkForTrainPairs(rawTrains: Entity[]): Promise<string[]>
             if (!trainAEntity.vehicle?.timestamp || !trainBEntity.vehicle?.timestamp) continue; // Skip if timestamps are missing
 
             let distance = calculateDistance(posA.latitude!, posA.longitude!, posB.latitude!, posB.longitude!); // Calculate distance between the two trains
-            distance = Math.max(distance - 2 * PAIR_CONFIG.trainLength, 0); // Adjust distance by train length to account for the GPS being in one end of the train (AMP car)
-            if (distance > (2 * PAIR_CONFIG.trainLength)) continue;
+            distance = Math.max(distance - 2 * PAIR_CRITERIA.trainLength, 0); // Adjust distance by train length to account for the GPS being in one end of the train (AMP car)
+            if (distance > (2 * PAIR_CRITERIA.trainLength)) continue;
 
             const timeDiff = Math.abs(trainAEntity.vehicle.timestamp - trainBEntity.vehicle.timestamp);
             const speed = distance / timeDiff;
-            if (speed > PAIR_CONFIG.maxSpeed) continue;
+            if (speed > PAIR_CRITERIA.maxSpeed) continue;
 
             const speedDiff = Math.abs(posA.speed! - posB.speed!); // Calculate speed difference in m/s
-            if (speedDiff > PAIR_CONFIG.maxSpeedDiff) continue;
+            if (speedDiff > PAIR_CRITERIA.maxSpeedDiff) continue;
 
             const bearingDiff = calculateBearingDifference(posA.bearing!, posB.bearing!); // Calculate bearing difference in degrees
-            if (bearingDiff > PAIR_CONFIG.maxBearingDiff) continue;
+            if (bearingDiff > PAIR_CRITERIA.maxBearingDiff) continue;
 
             const routeA = trainAEntity.vehicle?.trip?.route_id;
             const routeB = trainBEntity.vehicle?.trip?.route_id;
@@ -170,20 +142,11 @@ export async function checkForTrainPairs(rawTrains: Entity[]): Promise<string[]>
 
             rawTrains = rawTrains.filter(train => train.vehicle?.vehicle?.id !== newPair.vehicleIds[0] && train.vehicle?.vehicle?.id !== newPair.vehicleIds[1]); // Remove trains that are now paired
             trainPairs.push(newPair);
-            console.log(`New pair ${newPair.pairKey} detected:`);
-            console.log(newPair);
+            // console.log(`New pair ${newPair.pairKey} detected`);
         }
     }
 
-    // 3. Save the updated train pairs to cache
-    if (trainPairs.length != previousTrainPairs.length) {
-        const added = trainPairs.filter(np => !previousTrainPairs.some(op => op.pairKey === np.pairKey)).length;
-        const removed = previousTrainPairs.filter(op => !trainPairs.some(np => np.pairKey === op.pairKey)).length;
-        console.log(`Train pairs updated: ${trainPairs.length} total. Added: ${added}, Removed: ${removed}.`);
-        await saveTrainPairsToCache();
-    }
-
-    // 4. Collect vehicle IDs of trains that are part of a pair (invisible trains)
+    // 3. Collect vehicle IDs of trains that are part of a pair (invisible trains)
     trainPairs.forEach(pair => {
         const [idA, idB] = pair.vehicleIds;
         const routeA = rawTrains.find(train => train.vehicle?.vehicle?.id === idA)?.vehicle?.trip?.route_id;
@@ -193,5 +156,5 @@ export async function checkForTrainPairs(rawTrains: Entity[]): Promise<string[]>
 
     // Remove duplicates
     invisibleTrainIds = Array.from(new Set(invisibleTrainIds));
-    return invisibleTrainIds;
+    return { invisibleTrainIds, trainPairs };
 }

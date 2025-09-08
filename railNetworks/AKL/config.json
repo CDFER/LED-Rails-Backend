@@ -1,0 +1,42 @@
+{
+  "GTFSRealtimeAPI": {
+    "url": "https://api.at.govt.nz/realtime/legacy",
+    "keyHeader": "Ocp-Apim-Subscription-Key",
+    "fetchIntervalSeconds": 19,
+    "format": "GTFSRealtime"
+  },
+  "trainFilter": {
+    "entityID": {
+      "start": "59000",
+      "end": "59999"
+    }
+  },
+  "processingOptions": {
+    "pairTrains": true,
+    "cacheGTFS": true,
+    "cacheIntervalSeconds": 259
+  },
+  "trackBlocks": {
+    "fileName": "trackBlocks.kml"
+  },
+  "LEDRailsAPI": {
+    "APIVersions": [
+      {
+        "version": "100",
+        "blockRemap": [
+          { "start": 304, "end": 344, "offset": -1 },
+          { "start": 138, "end": 208, "offset": -1 }
+        ]
+      },
+      { "version": "110" }
+    ],
+    "displayThreshold": 900,
+    "colors": {
+      "OUT-OF-SERVICE": [223, 0, 223],
+      "WEST-201": [0, 255, 0],
+      "EAST-201": [255, 128, 0],
+      "ONE-201": [0, 255, 255],
+      "STH-201": [255, 0, 0]
+    }
+  }
+}
