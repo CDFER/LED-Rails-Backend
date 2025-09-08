@@ -26,6 +26,7 @@ const rateLimiter = rateLimit({
     limit: DOWNSTREAM_RATE_LIMIT_CONFIG.maxRequests,
     standardHeaders: false,
     legacyHeaders: false,
+    ipv6Subnet: 128, // Rate limit per individual IPv6 address (otherwise /64 would share a limit which is too broad for NZ)
     message: {
         status: 429,
         error: 'Too many requests - please try again later',
