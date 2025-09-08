@@ -1,6 +1,6 @@
 # LED-Rails-Backend
 
-A backend service for real-time rail vehicle tracking, LED map generation, and train block analytics. Built with TypeScript, Express, and Bun.
+A backend service for real-time rail vehicle tracking for Live LED maps. Built with TypeScript, Express, and Bun.
 
 This project is built for the Live Train Maps that I sell through my store: [keastudios.co.nz](https://keastudios.co.nz)
 
