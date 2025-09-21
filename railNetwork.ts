@@ -153,17 +153,24 @@ export class RailNetwork {
      * @returns Promise<void>
      */
     async getGTFSRealtimeData() {
-        const response = await fetch(this.config.GTFSRealtimeAPI.url, {
-            headers: new Headers({
-                [this.config.GTFSRealtimeAPI.keyHeader]: this.config.GTFSRealtimeAPI.key ?? '',
-                'Accept': 'application/json,application',
-                'Accept-Encoding': 'gzip, deflate, br',
-            }),
-            redirect: 'follow', // Handle redirects
-        });
+        let response: Response;
+        try {
+            response = await fetch(this.config.GTFSRealtimeAPI.url, {
+                headers: new Headers({
+                    [this.config.GTFSRealtimeAPI.keyHeader]: this.config.GTFSRealtimeAPI.key ?? '',
+                    'Accept': 'application/json,application',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                }),
+                redirect: 'follow', // Handle redirects
+            });
+        } catch (error) {
+            log(this.id, `Error fetching GTFS Realtime: ${(error as Error).message}`);
+            return;
+        }
 
         if (!response.ok) {
             log(this.id, `Failed to fetch GTFS Realtime: ${response.status} ${response.statusText}`);
+            return;
         }
 
         let freshData;

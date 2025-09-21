@@ -48,6 +48,7 @@ export interface TrainInfo {
     currentBlock: number | undefined; // Track block number (e.g., 301)
     previousBlock: number | undefined; // Previous block number (e.g., 300)
     route: string; // Route ID from GTFS e.g. "EAST-201"
+    tripId: string | undefined; // Trip ID from GTFS
 }
 
 /**
@@ -295,6 +296,7 @@ function updateExistingTrainPosition(trackedTrain: TrainInfo, gtfsTrain: Entity)
     trackedTrain.position.speed = newSpeed;
     trackedTrain.position.timestamp = gtfsTrain.vehicle?.timestamp ?? 0;
     trackedTrain.route = String(gtfsTrain.vehicle?.trip?.route_id ?? 'OUT-OF-SERVICE');
+    trackedTrain.tripId = gtfsTrain.vehicle?.trip?.trip_id;
 }
 
 /**

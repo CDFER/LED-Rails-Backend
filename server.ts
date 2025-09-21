@@ -12,7 +12,8 @@ import { RailNetwork } from './railNetwork';
 const PORT = 3000;
 
 // --- Configuration Loading ---
-loadEnv(); // Load environment variables from .env file
+
+loadEnv({ quiet: true }); // Load environment variables from .env file
 const DOWNSTREAM_RATE_LIMIT_CONFIG = {
     windowMs: safeParseInt(process.env.RATE_LIMIT_WINDOW_MS, 60 * 1000), // 1 minute
     maxRequests: safeParseInt(process.env.RATE_LIMIT_MAX, 20), // Limit each IP to 20 requests per `window`
@@ -26,7 +27,7 @@ const rateLimiter = rateLimit({
     limit: DOWNSTREAM_RATE_LIMIT_CONFIG.maxRequests,
     standardHeaders: false,
     legacyHeaders: false,
-    ipv6Subnet: 128, // Rate limit per individual IPv6 address (otherwise /64 would share a limit which is too broad for NZ)
+    ipv6Subnet: 64, // Rate limit per individual IPv6 address (otherwise /56 would share a limit which is too broad for NZ)
     message: {
         status: 429,
         error: 'Too many requests - please try again later',
@@ -102,6 +103,10 @@ async function initializeServer() {
             // Raw data endpoint for trains only
             app.get(`/${network.id.toLowerCase()}-ltm/api/vehicles/trains`, (_req, res) => {
                 res.json(network.trainEntities);
+            });
+
+            app.get(`/${network.id.toLowerCase()}-ltm/api/trackedtrains`, (_req, res) => {
+                res.json(network.trackedTrains);
             });
 
             // Simple HTML map view for debugging (serves map.html, currently http only)
