@@ -232,7 +232,7 @@ export class RailNetwork {
         const freshTripUpdates = freshData?.entity?.filter(e => e.trip_update);
         //log(LOG_LABELS.SYSTEM, `Trip Updates: ${JSON.stringify(freshTripUpdates, null, 2)}`);
 
-        if (freshData?.entity) {
+        if (freshTripUpdates) {
             for (const entity of freshTripUpdates) {
                 const tripUpdate = entity.trip_update;
                 
@@ -240,7 +240,7 @@ export class RailNetwork {
                 // log(LOG_LABELS.SYSTEM, `Processing trip update: ${JSON.stringify(tripUpdate, null, 2)}`);
                 
                 if (tripUpdate?.stop_time_update == null) {
-                    log(LOG_LABELS.SYSTEM, `Could not retrieve stop_time_update from ${Object.keys(tripUpdate).join(', ')}`);
+                    log(LOG_LABELS.SYSTEM, `Skipping a trip update with no stop_time_update`);
                     continue;   
                 }
 
