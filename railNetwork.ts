@@ -15,7 +15,7 @@ import {
 // Import cache helpers, train pairing logic, and logging
 import { saveToCache, readFromCache } from './cache';
 import { TrainPair, checkForTrainPairs } from './trainPairs';
-import { log } from './customUtils';
+import { log, LOG_LABELS } from './customUtils';
 
 /**
  * Configuration for a rail network, loaded from config.json
@@ -58,6 +58,12 @@ interface RailNetworkConfig {
         randomizeTimeOffset?: boolean; // Whether to randomize time offset for display (used for WLG where all trains are updated simultaneously)
         colors: {
             [key: string]: [number, number, number]; // Mapping of route names to [R,G,B] color values
+        };
+        delayThresholds: {
+            early: number; // Delay in seconds for early trains (negative)
+            minor: number; // Delay in seconds for minor delay
+            moderate: number; // Delay in seconds for moderate delay
+            severe: number; // Delay in seconds for severe delay
         };
     };
 }
@@ -126,6 +132,12 @@ export class RailNetwork {
                     colors: IdToColor,
                     updates: [],
                 },
+                delayThresholds: {
+                    early: this.config.LEDRailsAPI.delayThresholds?.early,
+                    minor: this.config.LEDRailsAPI.delayThresholds?.minor,
+                    moderate: this.config.LEDRailsAPI.delayThresholds?.moderate,
+                    severe: this.config.LEDRailsAPI.delayThresholds?.severe
+                }
             });
         }
 
@@ -214,6 +226,68 @@ export class RailNetwork {
         }
 
         this.trackedTrains = updateTrackedTrains(this.trackBlocks, this.trackedTrains, this.trainEntities, this.config.LEDRailsAPI.displayThreshold, this.invisibleTrains, this.id);
+
+        // After fetching fresh data, extract delays
+        const entitiesById = new Map(this.entities.map(e => [e.vehicle?.vehicle?.id, e]));
+        const freshTripUpdates = freshData?.entity?.filter(e => e.trip_update);
+        //log(LOG_LABELS.SYSTEM, `Trip Updates: ${JSON.stringify(freshTripUpdates, null, 2)}`);
+
+        if (freshData?.entity) {
+            for (const entity of freshTripUpdates) {
+                const tripUpdate = entity.trip_update;
+                
+                // Add debug logging
+                // log(LOG_LABELS.SYSTEM, `Processing trip update: ${JSON.stringify(tripUpdate, null, 2)}`);
+                
+                if (tripUpdate?.stop_time_update == null) {
+                    log(LOG_LABELS.SYSTEM, `Could not retrieve stop_time_update from ${Object.keys(tripUpdate).join(', ')}`);
+                    continue;   
+                }
+
+                // Split this into separate lines for debugging
+                const departureDelay = tripUpdate?.stop_time_update?.departure?.delay;
+                const arrivalDelay = tripUpdate?.stop_time_update?.arrival?.delay;
+                // log(LOG_LABELS.SYSTEM, `Departure delay: ${departureDelay},\n\t\t Arrival delay: ${arrivalDelay}`);
+                
+                const delay = arrivalDelay ?? departureDelay; // Treat arrival delay as primary, fallback to departure delay
+
+                // skip if stop_time_update or arrival or delay is null/undefined
+                if (delay == null) {
+                    log(LOG_LABELS.SYSTEM, `Skip Entity, no delay info available: ${JSON.stringify(tripUpdate?.stop_time_update)}`);
+                    continue;
+                }
+
+                const vehicleId = tripUpdate.vehicle?.id;
+                if (!vehicleId) {
+                    // log(LOG_LABELS.SYSTEM, `Skip update: no vehicle id on incoming entity`);
+                    continue;
+                }
+
+                // Update the corresponding tracked train
+                const trackedTrain = this.trackedTrains.find(t => t.trainId === vehicleId);
+                if (trackedTrain) {
+                    trackedTrain.delaySeconds = delay;
+                    trackedTrain.delayStatus = this.getDelayColor(delay);
+                    // log(LOG_LABELS.SYSTEM, `Updated tracked train ${vehicleId} with delay status: ${trackedTrain.delayStatus}`);
+                } else {
+                    log(LOG_LABELS.SYSTEM, `No tracked train for vehicle ${vehicleId}`);
+                }
+            }
+        }
+    }
+
+    getDelayColor(delay?: number): string {
+        var delayState = 'ON_TIME';
+        if (!delay) return delayState;
+        
+        const thresholds = this.config.LEDRailsAPI.delayThresholds;
+        if (delay <= thresholds.early) delayState = 'EARLY';
+        if (delay >= thresholds.minor) delayState = 'DELAY_MINOR';
+        if (delay >= thresholds.moderate) delayState = 'DELAY_MODERATE';
+        if (delay >= thresholds.severe) delayState = 'DELAY_SEVERE';
+        // log(LOG_LABELS.SYSTEM, `Determined delay status: ${delayState} (${delay}s)`);
+        
+        return delayState;
     }
 
     /**
@@ -226,7 +300,7 @@ export class RailNetwork {
     async updateLEDRailsAPIs() {
         for (let index = 0; index < this.ledRailsAPIs.length; index++) {
             const api = this.ledRailsAPIs[index];
-            if (api) {
+            if (api) {                
                 this.ledRailsAPIs[index] = generateLedMap(api, this.trackedTrains, this.invisibleTrains);
             }
         }

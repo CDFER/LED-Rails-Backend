@@ -15,6 +15,12 @@ export interface LEDRailsAPI {
     randomizeTimeOffset: boolean; // Whether to randomize time offsets for LED updates
     updateInterval: number; // Interval in seconds between updates
     output: LEDRailsAPIOutput; // The prepared output to send to the LED Rails API
+    delayThresholds: {
+        early: number; // Delay in seconds for early trains (negative)
+        minor: number; // Delay in seconds for minor delay
+        moderate: number; // Delay in seconds for moderate delay
+        severe: number; // Delay in seconds for severe delay
+    };
 }
 
 interface LEDRailsAPIOutput {
@@ -48,6 +54,8 @@ export interface TrainInfo {
     currentBlock: number | undefined; // Track block number (e.g., 301)
     previousBlock: number | undefined; // Previous block number (e.g., 300)
     route: string; // Route ID from GTFS e.g. "EAST-201"
+    delaySeconds: number; // Delay in seconds (negative if early)
+    delayStatus: string; // Categorised delay string e.g. "ON_TIME", "DELAY_MINOR"
     tripId: string | undefined; // Trip ID from GTFS
 }
 
@@ -318,8 +326,11 @@ function addNewTrain(trackedTrains: TrainInfo[], gtfsTrain: Entity): void {
             speed: position?.speed, // Can be undefined (e.g. WLG does not provide speed)
         },
         route: String(vehicle?.trip?.route_id ?? 'OUT-OF-SERVICE'),
+        delaySeconds: 0, // default to 0
+        delayStatus: 'DELAY_MINOR', // default to DELAY_MINOR until proven otherwise
         currentBlock: undefined,
         previousBlock: undefined,
+        tripId: vehicle?.trip?.trip_id
     });
 }
 
@@ -464,7 +475,9 @@ export function generateLedMap(api: LEDRailsAPI, trackedTrains: TrainInfo[], inv
         .forEach(train => {
             // Only update if both current and previous block are known
             if (train.currentBlock !== undefined && train.previousBlock !== undefined) {
-                const colorId = api.routeToColorId[train.route]; // Get color for this route
+                // const colorId = api.routeToColorId[train.route]; // Get color for this route
+                const colorId = api.routeToColorId[train.delayStatus]; // Get color for this level of delay
+                //log(LOG_LABELS.SYSTEM, `Train ${train.trainId} on route ${train.route} has delay status ${train.delayStatus} with color ID ${colorId}`);
                 if (colorId != undefined) {
                     let timeOffset = 0;
                     // Determine time offset for LED animation
@@ -485,7 +498,8 @@ export function generateLedMap(api: LEDRailsAPI, trackedTrains: TrainInfo[], inv
                         t: timeOffset, // Time offset for animation
                     });
                 } else {
-                    log(LOG_LABELS.ERROR, `No color mapping for route ${train.route}`);
+                    // log(LOG_LABELS.ERROR, `No color mapping for route ${train.route}`);
+                    log(LOG_LABELS.ERROR, `No color mapping for delay status ${train.delayStatus}`);
                 }
             }
         });

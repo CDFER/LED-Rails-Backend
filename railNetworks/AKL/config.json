@@ -33,10 +33,21 @@
     "displayThreshold": 900,
     "colors": {
       "OUT-OF-SERVICE": [223, 0, 223],
-      "WEST-201": [0, 255, 0],
-      "EAST-201": [255, 128, 0],
-      "ONE-201": [0, 255, 255],
-      "STH-201": [255, 0, 0]
+      "WEST-201": [0, 255, 43],
+      "EAST-201": [235, 162, 34],
+      "ONE-201": [0, 134, 255],
+      "STH-201": [255, 0, 0],
+      "DELAY_SEVERE": [220, 0, 100],
+      "DELAY_MODERATE": [255, 0, 0],
+      "DELAY_MINOR": [255, 140, 0],
+      "ON_TIME": [0, 200, 0],
+      "EARLY": [0, 180, 180]
+    },
+    "delayThresholds": {
+      "early": -30,
+      "minor": 90,
+      "moderate": 600,
+      "severe": 1200
     }
   }
 }
