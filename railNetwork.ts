@@ -227,10 +227,22 @@ export class RailNetwork {
 
         this.trackedTrains = updateTrackedTrains(this.trackBlocks, this.trackedTrains, this.trainEntities, this.config.LEDRailsAPI.displayThreshold, this.invisibleTrains, this.id);
 
-        // After fetching fresh data, extract delays
-        const entitiesById = new Map(this.entities.map(e => [e.vehicle?.vehicle?.id, e]));
-        const freshTripUpdates = freshData?.entity?.filter(e => e.trip_update);
-        //log(LOG_LABELS.SYSTEM, `Trip Updates: ${JSON.stringify(freshTripUpdates, null, 2)}`);
+        // After fetching fresh data, extract delays from tripupdates and update tracked trains
+        const freshTripUpdates = freshData?.entity?.filter(e => {
+            if (!e.trip_update) return false; // only want trip updates
+
+            if (this.config.trainFilter.entityID) { // filter by entity ID range (only want trains)
+                const idNum = Number(e.trip_update.vehicle?.id);
+                if (!idNum) return false;
+                return idNum >= this.config.trainFilter.entityID.start && 
+                       idNum <= this.config.trainFilter.entityID.end;
+            } else if (this.config.trainFilter.trip_ID) { // filter by trip_id substring
+                const includesStr = this.config.trainFilter.trip_ID?.includes;
+                return includesStr !== undefined && 
+                       e.trip_update.trip?.trip_id?.includes(includesStr);
+            }
+            return false;
+        });
 
         if (freshTripUpdates) {
             for (const entity of freshTripUpdates) {
