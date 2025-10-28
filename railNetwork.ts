@@ -266,11 +266,10 @@ export class RailNetwork {
         // Now use only the most recent trip update for each trip_id
         // After deduplication
         const now = Math.floor(Date.now() / 1000); // current time in seconds
-
         const dedupedTripUpdates = Array.from(vehicleUpdateMap.values())
             .filter(entity => {
                 const ts = entity.trip_update?.timestamp ?? 0;
-                return (now - ts) <= 180; // Only include updates from the last 3 minutes
+                return (now - ts) <= 300; // Only include updates from the last 5 minutes
             });
 
         if (dedupedTripUpdates) {
