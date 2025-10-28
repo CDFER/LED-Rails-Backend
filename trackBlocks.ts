@@ -471,6 +471,7 @@ export function generateLedMap(api: LEDRailsAPI, trackedTrains: TrainInfo[], inv
     // Iterate over trains that should be displayed
     trackedTrains
         .filter(train => train.position.timestamp >= displayCutoff) // Only show trains with recent updates
+        .filter(train => train.route !== 'OUT-OF-SERVICE') // Exclude out-of-service trains
         .filter(train => !invisibleTrainIds.includes(train.trainId)) // Exclude invisible trains (e.g. paired trains)
         .forEach(train => {
             // Only update if both current and previous block are known
