@@ -1,7 +1,8 @@
 import * as fs from 'fs';
 import { DOMParser } from '@xmldom/xmldom';
-import type { Entity } from 'gtfs-types';
+import type { Entity, StopTimeUpdate } from 'gtfs-types';
 import { LOG_LABELS, log } from './customUtils';
+import { calculateDistance } from './trainPairs';
 
 export interface LEDRailsAPI {
     routeToColorId: Record<string, number>; // Map of route names to color IDs
@@ -18,22 +19,31 @@ export interface LEDRailsAPI {
 }
 
 interface LEDRailsAPIOutput {
-    version: string;                    // Intended Version of the Board (e.g. "100" for V1.0.0)
+    version: string;                    // Intended Hardware Version of the Board (e.g. "100" for V1.0.0)
     timestamp: number;                  // Epoch Seconds timestamp of this update
     update: number;                     // Offset time from timestamp for next update
-    colors: Record<number, number[]>;   // Map color Id to [R,G,B]
+    colors: Record<number, number[]>;   // Map color Id to [R,G,B] (0-255)
     updates: LEDUpdate[];               // Map block number to LEDUpdate
 }
 
 interface LEDUpdate {
-    b: number[]; // [Pre, Post] update track block number (e.g., 302)
+    b: number[]; // [Pre, Post] update track block number (e.g., LED D102 is Block number 102)
     c: number; // Color ID
-    t: number; // Offset time from timestamp in seconds
+    t: number; // Offset time from timestamp in seconds (When it should change from Pre to Post Block)
+}
+
+interface Platform {
+    blockNumber: number; // Track block number (ref from pcb) (e.g., D302 is 302)
+    stop_ids: string[] | undefined;    // GTFS stop_ids associated with this platform
+    isDefault: boolean | undefined; // Indicates if this is the default platform for the block (for express trains that don't stop at this station)
+    bearing: number | undefined; // Default bearing (Used if there are multiple default platforms)
+    routes: string[] | undefined;       // Allowed routes for this block, parsed from [ROUTE1,ROUTE2]
 }
 
 interface TrackBlock {
     blockNumber: number;                // Track block number (ref from pcb) (e.g., D302 is 302)
-    altBlock: number | undefined;       // Alternative block number if applicable (for platforms 3/4)
+    platforms: Platform[] | undefined;  // Array of platforms associated with this block
+    altBlock: number | undefined;       // Alternative block number (can be used if multiple trains are same block)
     name: string;                       // Name of the KML Placemark (e.g. "302 - Parnell")
     priority: boolean;                  // Indicates if trains should be put in this block first when blocks overlap
     polygon: Array<[number, number]>;   // Array of [latitude, longitude] tuples
@@ -44,11 +54,12 @@ export type TrackBlockMap = Map<number, TrackBlock>;
 
 export interface TrainInfo {
     trainId: string; // Vehicle ID from GTFS e.g. "59185" for AMP185
-    position: { latitude: number; longitude: number; timestamp: number; speed: number | undefined }; // GTFS Position update of the train
+    position: { latitude: number; longitude: number; timestamp: number; speed: number | undefined, bearing: number | undefined }; // GTFS Position update of the train
     currentBlock: number | undefined; // Track block number (e.g., 301)
     previousBlock: number | undefined; // Previous block number (e.g., 300)
     route: string; // Route ID from GTFS e.g. "EAST-201"
     tripId: string | undefined; // Trip ID from GTFS
+    stops: { stopId: string; departureTime: number }[] | undefined;     // Array of upcoming stop IDs and departure times for this train
 }
 
 /**
@@ -62,76 +73,189 @@ export function loadTrackBlocks(cityID: string, filePath: string) {
     const kmlContent = fs.readFileSync(filePath, 'utf-8');
     const doc = new DOMParser().parseFromString(kmlContent, 'text/xml');
     const loadedBlocks: TrackBlock[] = [];
-    const placemarks = doc.getElementsByTagName('Placemark');
 
-    for (const placemark of Array.from(placemarks)) {
-        const nameElement = placemark.getElementsByTagName('name')[0];
-        const id = nameElement?.textContent;
+    for (const folder of Array.from(doc.getElementsByTagName('Folder'))) {
+        for (const placemark of Array.from(folder.getElementsByTagName('Placemark'))) {
+            // const nameElement = placemark.getElementsByTagName('name')[0];
+            const id = placemark.getElementsByTagName('name')[0]?.textContent;
+            const description = placemark.getElementsByTagName('description')[0]?.textContent;
 
-        // Skip placemarks without a name
-        if (!id) {
-            log(cityID, 'trackblock.kml Placemark without a name found, skipping.');
-            continue;
-        }
-
-        // Extracts the first sequence of digits from the ID to use as the block number.
-        let priority = false;
-        let blockNumber: number;
-        let altBlock: number | undefined;
-        let routes: string[] | undefined;
-
-        const blockNumberMatch = id.match(/(\d+)/);
-        if (blockNumberMatch && blockNumberMatch[1]) {
-            blockNumber = parseInt(blockNumberMatch[1], 10);
-        } else {
-            log(cityID, `trackblock.kml polygon does not contain a block number: ${id}`);
-            continue;
-        }
-
-        // Parse altBlock from +N in the id string (e.g., "+402" means altBlock is 402)
-        const altBlockMatch = id.match(/\+(\d+)/);
-        if (altBlockMatch && altBlockMatch[1]) {
-            altBlock = parseInt(altBlockMatch[1], 10);
-        }
-
-        // Parse routes from "[ROUTE1,ROUTE2]" at the end of the id string
-        const routesMatch = id.match(/\[([^\]]+)\]/);
-        if (routesMatch && routesMatch[1]) {
-            routes = routesMatch[1].split(',').map(s => s.trim()).filter(Boolean);
-        }
-
-        // Parse priority from presence of a group of letters (>=3) anywhere in the ID
-        const nameMatch = id.match(/[a-zA-Z]{3,}/);
-        if (nameMatch) {
-            priority = true;
-        }
-
-        const coordinatesElement = placemark.getElementsByTagName('coordinates')[0];
-        const coordsString = coordinatesElement?.textContent?.trim();
-
-        if (coordsString) {
-            const points = coordsString
-                .split(/\s+/)
-                .map((coordPairStr) => {
-                    const [lon, lat] = coordPairStr.split(',').map(Number);
-                    return [lat, lon] as [number, number];
-                })
-                .filter(point => !isNaN(point[0]) && !isNaN(point[1]));
-
-            if (points.length > 0) {
-                loadedBlocks.push({
-                    name: id,
-                    blockNumber,
-                    altBlock,
-                    priority,
-                    polygon: points,
-                    routes,
-                });
-            } else {
-                log(cityID, `trackblock.kml Placemark '${id}' had no valid coordinates`);
+            // Skip placemarks without a name
+            if (!id) {
+                log(cityID, 'trackblock.kml Placemark without a name found, skipping.');
+                continue;
             }
-        } else {
-            log(cityID, `trackblock.kml Placemark '${id}' missing coordinates`);
+
+            const platforms: Platform[] = [];
+
+            if (description) {
+                // Split description into lines and then by ',' to extract platforms
+                const platformLines = description.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+                for (const line of platformLines) {
+                    // Expected format: 102,"12260";"12261";,Default,-72deg,[aus:vic:vic-02-LIL:,aus:vic:vic-02-ALM:],
+
+                    // Trim the line to remove any leading/trailing whitespace
+                    const trimmedLine = line.trim();
+                    if (!trimmedLine) continue; // Skip empty lines
+
+                    // Split by comma if the comma is not between square brackets
+                    const parts = trimmedLine.split(/,(?![^\[]*\])/);
+
+                    // Initialize variables with defaults
+                    let blockNumber: number = 0;
+                    let stop_ids: string[] = [];
+                    let isDefault: boolean = false;
+                    let bearing: number | undefined = undefined;
+                    let routes: string[] | undefined = [];
+
+                    // Parse block number from first part (should be digits only)
+                    if (parts.length > 0 && parts[0]) {
+                        const blockMatch = parts[0].match(/^(\d+)$/);
+                        if (blockMatch) {
+                            blockNumber = parseInt(blockMatch[1], 10);
+                        }
+                    }
+
+                    // Parse stop IDs from second part (index 1)
+                    if (parts.length > 1 && parts[1]) {
+                        const stopIdsPart = parts[1];
+                        // Extract all quoted values like "12260", "12261", etc
+                        const stopIdMatches = stopIdsPart.matchAll(/"([^"]+)"/g);
+                        for (const match of stopIdMatches) {
+                            if (match[1]) {
+                                stop_ids.push(match[1].trim());
+                            }
+                        }
+
+                        // If no quoted values found but the part contains values, try splitting by semicolon
+                        if (stop_ids.length === 0 && stopIdsPart.length > 0) {
+                            stop_ids = stopIdsPart.split(';')
+                                .map(s => s.replace(/"/g, '').trim())
+                                .filter(s => s.length > 0);
+                        }
+                    }
+
+                    // Parse isDefault by checking if "Default" appears in any part
+                    isDefault = parts.some(part => part === 'Default');
+
+                    // Parse bearing by checking for pattern "XXXdeg" in any part
+                    for (const part of parts) {
+                        if (part.includes('deg')) {
+                            const bearingMatch = part.match(/^(-?\d+)deg$/);
+                            if (bearingMatch && bearingMatch[1]) {
+                                bearing = parseInt(bearingMatch[1], 10);
+                                if (bearing < 0) bearing += 360; // Convert negative to positive bearing
+                                bearing %= 360; // Normalize to 0-359
+                                break; // Found bearing, no need to check other parts
+                            }
+                        }
+                    }
+
+                    // Parse routes by checking for pattern "[...]" in any part
+                    for (const part of parts) {
+                        if (part.startsWith('[') && part.endsWith(']')) {
+                            const routesPart = part.slice(1, -1); // Remove brackets
+                            routes = routesPart.split(',')
+                                .map(s => s.trim())
+                                .filter(s => s.length > 0);
+                            break; // Found routes, no need to check other parts
+                        }
+                    }
+
+                    if (routes.length === 0) {
+                        routes = undefined;
+                    }
+
+                    platforms.push({
+                        blockNumber,
+                        stop_ids,
+                        isDefault,
+                        bearing,
+                        routes,
+                    });
+                }
+            }
+
+
+            // Extracts the first sequence of digits from the ID to use as the block number.
+            let priority = false;
+            let blockNumber: number;
+            let altBlock: number | undefined;
+            let routes: string[] | undefined;
+
+            const blockNumberMatch = id.match(/(\d+)/);
+            if (blockNumberMatch && blockNumberMatch[1]) {
+                blockNumber = parseInt(blockNumberMatch[1], 10);
+                if (platforms.length > 0 && !platforms.map(p => p.blockNumber).includes(blockNumber)) {
+                    log(cityID, `trackblock.kml Placemark '${id}' block number ${blockNumber} not found in any platform definitions`);
+                }
+            } else {
+                log(cityID, `trackblock.kml polygon does not contain a block number: ${id}`);
+                continue;
+            }
+
+            // Parse altBlock from +N in the id string (e.g., "+402" means altBlock is 402)
+            const altBlockMatch = id.match(/\+(\d+)/);
+            if (altBlockMatch && altBlockMatch[1]) {
+                altBlock = parseInt(altBlockMatch[1], 10);
+            }
+
+            // Parse routes from "[ROUTE1,ROUTE2]" at the end of the id string
+            const routesMatch = id.match(/\[([^\]]+)\]/);
+            if (routesMatch && routesMatch[1]) {
+                routes = routesMatch[1].split(',').map(s => s.trim()).filter(Boolean);
+            }
+
+            // Parse priority from presence of a group of letters (>=3) anywhere in the ID
+            const nameMatch = id.match(/[a-zA-Z]{3,}/);
+            if (nameMatch) {
+                priority = true;
+            }
+
+            const coordinatesElement = placemark.getElementsByTagName('coordinates')[0];
+            const coordsString = coordinatesElement?.textContent?.trim();
+
+            if (coordsString) {
+                const points = coordsString
+                    .split(/\s+/)
+                    .map((coordPairStr) => {
+                        const [lon, lat] = coordPairStr.split(',').map(Number);
+                        return [lat, lon] as [number, number];
+                    })
+                    .filter(point => !isNaN(point[0]) && !isNaN(point[1]));
+
+                if (points.length > 0) {
+                    loadedBlocks.push({
+                        name: id,
+                        blockNumber,
+                        platforms: platforms.length > 0 ? platforms : undefined,
+                        altBlock,
+                        priority,
+                        polygon: points,
+                        routes,
+                    });
+                } else {
+                    log(cityID, `trackblock.kml Placemark '${id}' had no valid coordinates`);
+                }
+            } else {
+                log(cityID, `trackblock.kml Placemark '${id}' missing coordinates`);
+            }
+        }
+    }
+
+    // Check that bearings are 180 degrees apart for platforms within the same block
+    for (const block of loadedBlocks) {
+        let bearing = undefined;
+        for (const platform of block.platforms ?? []) {
+            if (platform.bearing) {
+                if (bearing == undefined) {
+                    bearing = platform.bearing;
+                } else {
+                    if (bearing != (platform.bearing + 180) % 360 && bearing != platform.bearing) {
+                        log(cityID, `Inconsistent bearings found in block ${block.blockNumber} platforms (${bearing} vs ${platform.bearing})`);
+                    }
+                }
+            }
         }
     }
 
@@ -197,6 +321,26 @@ function isPointInPolygon(pointLat: number, pointLng: number, polygon: Array<[nu
 }
 
 /**
+ * Calculates speed in meters per second between two geographic points over a time interval.
+ * @param lat1 Latitude of the first point
+ * @param lon1 Longitude of the first point
+ * @param lat2 Latitude of the second point
+ * @param lon2 Longitude of the second point
+ * @param time1 Timestamp of the first point in seconds since epoch
+ * @param time2 Timestamp of the second point in seconds since epoch
+ * @returns Speed in meters per second
+ */
+function calculatedSpeed(lat1: number, lon1: number, lat2: number, lon2: number, time1: number, time2: number): number {
+    const distanceMeters = calculateDistance(lat1, lon1, lat2, lon2);
+    const timeDeltaSeconds = time2 - time1;
+    if (timeDeltaSeconds > 0) {
+        return distanceMeters / timeDeltaSeconds;
+    } else {
+        return 0;
+    }
+}
+
+/**
  * Checks if a train is within a specific track block polygon.
  *
  * @param trackBlocks Map of track blocks
@@ -208,7 +352,7 @@ const trainInBlock = (trackBlocks: TrackBlockMap, train: TrainInfo, blockNumber:
     const block = trackBlocks.get(blockNumber);
     if (block) {
         // If block routes are defined, check if the train's route is allowed in this block
-        if (block.routes && !block.routes.includes(train.route)) {
+        if (block.routes && !block.routes.some(r => train.route.includes(r))) {
             return false;
         } else {
             return isPointInPolygon(train.position.latitude, train.position.longitude, block.polygon);
@@ -231,19 +375,21 @@ const trainInBlock = (trackBlocks: TrackBlockMap, train: TrainInfo, blockNumber:
  * @returns Updated array of tracked trains with current positions and block assignments
  */
 export function updateTrackedTrains(
-    trackBlocks: TrackBlockMap,
+    trackBlocks: TrackBlockMap | undefined,
     trackedTrains: TrainInfo[],
     gtfsTrains: Entity[],
     displayThreshold: number,
     invisibleTrainIds: string[],
-    cityID: string
+    cityID: string,
 ): TrainInfo[] {
 
     // Synchronize GTFS train data with our tracked trains
     syncTrainData(trackedTrains, gtfsTrains);
 
     // Update track block assignments for all trains with valid positions
-    assignBlocksToTrains(trackBlocks, trackedTrains, displayThreshold, invisibleTrainIds, cityID);
+    if (trackBlocks) {
+        assignBlocksToTrains(trackBlocks, trackedTrains, displayThreshold, invisibleTrainIds, cityID);
+    }
 
     return trackedTrains;
 }
@@ -267,6 +413,33 @@ function syncTrainData(trackedTrains: TrainInfo[], gtfsTrains: Entity[]): void {
     });
 }
 
+function addNewStopsFromTripUpdate(stops: { stopId: string; departureTime: number }[], tripUpdate: StopTimeUpdate[] | undefined): { stopId: string; departureTime: number }[] | undefined {
+    if (tripUpdate) {
+        for (const stu of tripUpdate) {
+            const stopId = stu.stopId ?? '';
+            const newDepartureTime = stu.departure?.time
+                ? Number(stu.departure.time)
+                : Number(stu.arrival?.time);
+
+            const existingStop = stops.find(s => s.stopId === stopId);
+
+            if (existingStop) {
+                if (existingStop.departureTime !== newDepartureTime) {
+                    existingStop.departureTime = newDepartureTime;
+                }
+            } else {
+                stops.push({ stopId, departureTime: newDepartureTime });
+            }
+        }
+
+        // Remove stops with a departure time that are more than 10 mins in the past while keeping those with unknown departure times (0)
+        const now = Math.ceil(Date.now() / 1000);
+        stops = stops.filter(s => s.departureTime == 0 || s.departureTime >= now - 60 * 10);
+    }
+
+    return stops.length > 0 ? stops : undefined;
+}
+
 /**
  * Updates position data for an existing tracked train.
  *
@@ -275,28 +448,45 @@ function syncTrainData(trackedTrains: TrainInfo[], gtfsTrains: Entity[]): void {
  */
 function updateExistingTrainPosition(trackedTrain: TrainInfo, gtfsTrain: Entity): void {
     const newPosition = gtfsTrain.vehicle?.position;
-    const newSpeed = newPosition?.speed;
 
-    if (newSpeed && newSpeed === 0 && trackedTrain.position.speed === 0) {
-        const SMOOTHING_FACTOR = 0.95;
-        trackedTrain.position.latitude = (
-            trackedTrain.position.latitude * SMOOTHING_FACTOR +
-            (newPosition?.latitude ?? 0) * (1 - SMOOTHING_FACTOR)
-        );
-        trackedTrain.position.longitude = (
-            trackedTrain.position.longitude * SMOOTHING_FACTOR +
-            (newPosition?.longitude ?? 0) * (1 - SMOOTHING_FACTOR)
-        );
-    } else {
-        trackedTrain.position.latitude = newPosition?.latitude ?? 0;
-        trackedTrain.position.longitude = newPosition?.longitude ?? 0;
+    if (newPosition?.latitude != trackedTrain.position.latitude ||
+        newPosition?.longitude != trackedTrain.position.longitude) {
+        // Position has changed
+
+        let newSpeed = newPosition?.speed;
+
+        if (newSpeed) {
+            if (newSpeed === 0 && trackedTrain.position.speed === 0) {
+                const SMOOTHING_FACTOR = 0.95;
+                trackedTrain.position.latitude = (
+                    trackedTrain.position.latitude * SMOOTHING_FACTOR +
+                    (newPosition?.latitude ?? 0) * (1 - SMOOTHING_FACTOR)
+                );
+                trackedTrain.position.longitude = (
+                    trackedTrain.position.longitude * SMOOTHING_FACTOR +
+                    (newPosition?.longitude ?? 0) * (1 - SMOOTHING_FACTOR)
+                );
+            }
+        } else {
+            newSpeed = calculatedSpeed(trackedTrain.position.latitude, trackedTrain.position.longitude, newPosition?.latitude ?? 0, newPosition?.longitude ?? 0, trackedTrain.position.timestamp, gtfsTrain.vehicle?.timestamp ?? 0);
+            // log('WARN', `Calculated speed for train ${trackedTrain.trainId} as ${newSpeed.toFixed(2)} m/s`);
+            trackedTrain.position.latitude = newPosition?.latitude ?? 0;
+            trackedTrain.position.longitude = newPosition?.longitude ?? 0;
+        }
+
+        if (newSpeed > 4 && newSpeed < 55) { // 4 m/s = ~15 km/h and 55 m/s = ~198 km/h
+            // Only update bearing if speed is reasonable (to avoid erratic bearing changes when stationary)
+            trackedTrain.position.bearing = newPosition?.bearing;
+        }
+
+        // Update other position properties
+        trackedTrain.position.speed = newSpeed;
+        trackedTrain.position.timestamp = gtfsTrain.vehicle?.timestamp ?? 0;
+
+        trackedTrain.route = String(gtfsTrain.vehicle?.trip?.route_id ?? gtfsTrain.vehicle?.trip?.routeId ?? 'OUT-OF-SERVICE');
+        trackedTrain.tripId = gtfsTrain.vehicle?.trip?.trip_id;
+        trackedTrain.stops = addNewStopsFromTripUpdate(trackedTrain.stops ?? [], gtfsTrain.tripUpdate?.stopTimeUpdate);
     }
-
-    // Update other position properties
-    trackedTrain.position.speed = newSpeed;
-    trackedTrain.position.timestamp = gtfsTrain.vehicle?.timestamp ?? 0;
-    trackedTrain.route = String(gtfsTrain.vehicle?.trip?.route_id ?? 'OUT-OF-SERVICE');
-    trackedTrain.tripId = gtfsTrain.vehicle?.trip?.trip_id;
 }
 
 /**
@@ -316,10 +506,13 @@ function addNewTrain(trackedTrains: TrainInfo[], gtfsTrain: Entity): void {
             longitude: position?.longitude ?? 0,
             timestamp: vehicle?.timestamp ?? 0,
             speed: position?.speed, // Can be undefined (e.g. WLG does not provide speed)
+            bearing: position?.bearing, // Can be undefined
         },
-        route: String(vehicle?.trip?.route_id ?? 'OUT-OF-SERVICE'),
+        route: String(vehicle?.trip?.route_id ?? vehicle?.trip?.routeId ?? 'OUT-OF-SERVICE'),
         currentBlock: undefined,
         previousBlock: undefined,
+        tripId: vehicle?.trip?.trip_id,
+        stops: addNewStopsFromTripUpdate([], gtfsTrain.tripUpdate?.stopTimeUpdate),
     });
 }
 
@@ -364,6 +557,17 @@ function assignBlocksToTrains(trackBlocks: TrackBlockMap, trackedTrains: TrainIn
     updateAltBlocks(trackBlocks, trackedTrains, invisibleTrainIds, cityID);
 }
 
+function setTrainBlock(train: TrainInfo, blockNumber: number): void {
+    if (train.previousBlock === undefined) {
+        // console.log(`Setting previousBlock for train ${train.trainId} to 0 (prevBlock was ${train.previousBlock} and currentBlock to ${blockNumber})`);
+        train.previousBlock = 0; // Set previousBlock if not already set
+    } else {
+        train.previousBlock = train.currentBlock;
+        // console.log(`Setting previousBlock for train ${train.trainId} to ${train.previousBlock} (currentBlock to ${blockNumber})`);
+    }
+    train.currentBlock = blockNumber;
+}
+
 /**
  * Finds and sets the track block for a single train based on its position.
  *
@@ -372,30 +576,70 @@ function assignBlocksToTrains(trackBlocks: TrackBlockMap, trackedTrains: TrainIn
  * @param cityID City identifier (for logging)
  */
 function findAndSetTrainBlock(trackBlocks: TrackBlockMap, train: TrainInfo, cityID: string): void {
-
     // TODO: Optimize this search by checking nearby blocks first
     for (const block of trackBlocks.values()) {
         if (trainInBlock(trackBlocks, train, block.blockNumber)) {
-            if (train.previousBlock) {
-                train.previousBlock = train.currentBlock;
+
+            if (block.platforms) {
+                // 1: Platforms with matching stop_ids
+                for (const platform of block.platforms) {
+                    if (platform.routes && !platform.routes.some(r => train.route.includes(r))) {
+                        continue; // Skip this platform if the train's route is not allowed
+                    }
+
+                    // If the platform has stop_ids, check if the train is scheduled to stop there
+                    if (platform.stop_ids && train.stops) {
+                        const stopsIntersection = platform.stop_ids.filter(stopId => train.stops!.some(s => s.stopId === stopId));
+                        if (stopsIntersection.length > 0) {
+                            setTrainBlock(train, platform.blockNumber);
+                            return;
+                        }
+                    }
+                }
+
+                // 2: Default platforms with matching bearing
+                for (const platform of block.platforms) {
+                    if (platform.routes && !platform.routes.some(r => train.route.includes(r))) {
+                        continue; // Skip this platform if the train's route is not allowed
+                    }
+
+                    if (platform.isDefault) {
+                        if (platform.bearing) {
+                            if (train.position.bearing) {
+                                // If the platform has a bearing, check if the train's heading is within +/-90 degrees
+                                train.position.bearing = train.position.bearing % 360;
+                                const bearingDiff = Math.abs(platform.bearing - train.position.bearing);
+                                const normalizedBearingDiff = bearingDiff > 180 ? 360 - bearingDiff : bearingDiff;
+                                if (normalizedBearingDiff <= 90) {
+                                    setTrainBlock(train, platform.blockNumber);
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 3: Any default platform for this block
+                for (const platform of block.platforms) {
+                    if (platform.routes && !platform.routes.some(r => train.route.includes(r))) {
+                        continue; // Skip this platform if the train's route is not allowed
+                    }
+                    if (platform.isDefault && !platform.bearing) {
+                        setTrainBlock(train, platform.blockNumber);
+                        return;
+                    }
+                }
+
             } else {
-                train.previousBlock = 0; // Set previousBlock if not already set
+                setTrainBlock(train, block.blockNumber);
+                return;
             }
-            train.currentBlock = block.blockNumber;
-            return;
         }
     }
 
     // Train is not in any known block
     train.currentBlock = undefined;
     train.previousBlock = undefined;
-
-    // Only log if in the dev environment
-    if (process.env.NODE_ENV === 'development') {
-        if (train.trainId != "4396" && train.trainId != "4081" && train.trainId != "4398") { // Ignore known outliers (WLG Wairarapa Connection)
-            log(cityID, `Train ${train.trainId} on ${train.route} is not in any block (${train.position.latitude}, ${train.position.longitude})`, LOG_LABELS.WARNING);
-        }
-    }
 }
 
 /**
@@ -413,6 +657,7 @@ function updateAltBlocks(trackBlocks: TrackBlockMap, trackedTrains: TrainInfo[],
         const trainsInBlock = trackedTrains
             .filter(train => train.currentBlock === block.blockNumber)
             .filter(train => !invisibleTrainIds.includes(train.trainId))
+        // .filter(train => train.position.timestamp > Math.ceil(Date.now() / 1000) - 300); // Only consider trains with recent updates
         if (trainsInBlock.length > 1) {
             // Sort trains by route and make sure "OUT-OF-SERVICE" is last
             trainsInBlock.sort((a, b) => {

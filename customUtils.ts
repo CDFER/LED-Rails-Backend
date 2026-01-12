@@ -26,13 +26,20 @@ function getDeterministicColor(label: string): string {
         '\x1b[34m', // Blue
         '\x1b[31m', // Red
     ];
-    // Improved hash: sum char codes and multiply by length for more spread
-    let hash = 0;
+    // Generate a seed from the label
+    let seed = 0;
     for (let i = 0; i < label.length; i++) {
-        hash += label.charCodeAt(i) * (i + 1);
+        seed = ((seed << 5) - seed) + label.charCodeAt(i);
+        seed |= 0;
     }
-    hash *= label.length;
-    const idx = Math.abs(hash) % COLORS.length;
+
+    // Seeded random (Mulberry32 one-step)
+    let t = (seed + 0x6D2B79F5) | 0;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    const random = ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+
+    const idx = Math.floor(random * COLORS.length);
     return COLORS[idx] || '\x1b[0m';
 }
 

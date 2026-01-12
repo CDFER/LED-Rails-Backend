@@ -4,8 +4,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GTFS Vehicle Map</title>
-    <!-- Leaflet CSS -->
+    <title>Map</title>
+    <script>
+        // --- Dynamic Title based on URL ---
+        (function() {
+            // Try to extract region from pathname, e.g. /wlg-ltm/api/map or /WLG/api/map
+            const path = window.location.pathname.toLowerCase();
+            const match = path.match(/^\/?([^\/-]+)(?:-ltm)?[^\/]*\/api/);
+            if (match) {
+                const region = match[1].toUpperCase();
+                document.title = region + ' Map';
+            }
+        })();
+    </script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
         integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
     <style>
@@ -126,10 +137,11 @@
     <script>
         // --- Configuration ---
         const API_ENDPOINT = window.location.pathname.replace(/\/api\/map/, '/api/vehicles/trains');
+        const STOPS_ENDPOINT = window.location.pathname.replace(/\/api\/map/, '/api/stops');
         const REFRESH_INTERVAL_MS = 10 * 1000; // Refresh every 10 seconds
         const INITIAL_ZOOM_LEVEL = 12;
         const STATUS_ELEMENT = document.getElementById('status');
-        const STALE_TIMEOUT_MS = 15 * 60 * 1000; // 15 mins to consider vehicle stale
+        const STALE_TIMEOUT_MS = 5 * 60 * 1000; // 5 min to consider vehicle stale
 
         // --- Relative Time Formatter ---
         function getRelativeTime(timestamp) {
@@ -153,12 +165,18 @@
             return '';
         }
 
+        let stopsMap = {};
+        fetch(STOPS_ENDPOINT)
+            .then(response => response.json())
+            .then(data => { stopsMap = data; })
+            .catch(err => { console.error('Stops fetch error:', err); });
+
         // --- Map Initialization ---
         const map = L.map('map');
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,
-            attribution: '&copy; OpenStreetMap',
-            useCache: true,
+            attribution: '&copy; OpenStreetMap contributors',
+            edgeBufferTiles: 2,
         }).addTo(map);
 
         // --- Vehicle Marker Management ---
@@ -168,15 +186,50 @@
 
         // --- Route color mapping ---
         const ROUTE_COLORS = {
+            // Wellington
             '2': '#d3d110',   // Kapiti Line
             '3': '#f28399',   // Melling Line
             '4': '#fdc909',   // Wairarapa Line
             '5': '#f4892f',   // Hutt Valley Line
             '6': '#42c3dc',   // Johnsonville Line
-            'WEST-201': '#95c840',   // Green
-            'EAST-201': '#fdb918',   // Orange
-            'ONE-201': '#00adef',   // Blue
-            'STH-201': '#ed302a',   // Red
+
+            // Auckland
+            'WEST-201': '#95c840',   // Western
+            'EAST-201': '#fdb918',   // Eastern
+            'ONE-201': '#00adef',   // Onehunga
+            'STH-201': '#ed302a',   // Southern
+
+            // Melbourne
+            'aus:vic:vic-02-UFD:': '#fcb919',   // Upfield
+            'aus:vic:vic-02-CGB:': '#fcb919',   // Craigieburn
+            'aus:vic:vic-02-SUY:': '#fcb919',   // Sunbury
+            'aus:vic:vic-02-WIL:': '#009646',   // Williamstown
+            'aus:vic:vic-02-WER:': '#009646',   // Werribee
+            'aus:vic:vic-02-MDD:': '#d0222f',   // Mernda
+            'aus:vic:vic-02-HBE:': '#d0222f',   // Hurstbridge
+            'aus:vic:vic-02-LIL:': '#00518b',   // Lilydale
+            'aus:vic:vic-02-BEG:': '#00518b',   // Belgrave
+            'aus:vic:vic-02-ALM:': '#00518b',   // Alamein
+            'aus:vic:vic-02-GWY:': '#8b542f',   // Glen Waverley
+            'aus:vic:vic-02-PKM:': '#008dd0',   // Pakenham
+            'aus:vic:vic-02-CBE:': '#008dd0',   // Cranbourne
+            'aus:vic:vic-02-FKN:': '#009646',   // Frankston
+            'aus:vic:vic-02-STY:': '#009646',   // Stony Point
+            'aus:vic:vic-02-SHM:': '#f07fb3',   // Sandringham
+            // Sunbury - Pakenham via Metro Tunnel: #008dd0
+            'aus:vic:vic-01-ABY:': '#8F1A95',
+            'aus:vic:vic-01-ART:': '#8F1A95',
+            'aus:vic:vic-01-BAT:': '#8F1A95',
+            'aus:vic:vic-01-BDE:': '#8F1A95',
+            'aus:vic:vic-01-BGO:': '#8F1A95',
+            'aus:vic:vic-01-ECH:': '#8F1A95',
+            'aus:vic:vic-01-GEL:': '#8F1A95',
+            'aus:vic:vic-01-MBY:': '#8F1A95',
+            'aus:vic:vic-01-SER:': '#8F1A95',
+            'aus:vic:vic-01-SNH:': '#8F1A95',
+            'aus:vic:vic-01-SWL:': '#8F1A95',
+            'aus:vic:vic-01-TRN:': '#8F1A95',
+            'aus:vic:vic-01-WBL:': '#8F1A95'
         };
         const DEFAULT_ARROW_COLOR = '#ff00ff';
         let vehicleLabels = new Map(); // Map label (lowercase) to vehicleId
@@ -231,18 +284,35 @@
         }
 
         // Helper to generate popup content for a vehicle
-        function getVehiclePopupContent(vehicleInfo, vehicleId, trip, direction, latitude, longitude, position, vehicleData) {
+        function getVehiclePopupContent(vehicleInfo, vehicleId, trip, direction, latitude, longitude, position, vehicleData, entity) {
+            const stopIds = entity.tripUpdate?.stopTimeUpdate?.map(stu => stu.stopId) || [];
+            const stops = stopsMap ? stopIds.map(id => stopsMap[id]) : [];
             return `
                 ${vehicleInfo?.label ? `<b>Label:</b> ${vehicleInfo.label}<br>` : ''}
                 ${vehicleId ? `<b>Vehicle ID:</b> ${vehicleId}<br>` : ''}
                 ${trip?.route_id ? `<b>Route:</b> ${trip.route_id + (direction || '')}<br>` : ''}
+                ${trip?.routeId ? `<b>Route:</b> ${trip.routeId}<br>` : ''}
                 ${trip?.trip_id ? `<b>Trip:</b> ${trip.trip_id}<br>` : ''}
+                ${trip?.tripId ? `<b>Trip:</b> ${trip.tripId}<br>` : ''}
                 ${latitude !== undefined ? `<b>Lat:</b> ${latitude.toFixed(5)}<br>` : ''}
                 ${longitude !== undefined ? `<b>Lon:</b> ${longitude.toFixed(5)}<br>` : ''}
-                ${position?.bearing !== undefined ? `<b>Bearing:</b> ${position.bearing}°<br>` : ''}
+                ${position?.bearing !== undefined ? `<b>Bearing:</b> ${Number(position.bearing).toFixed(0)}°<br>` : ''}
                 ${position?.speed !== undefined ? `<b>Speed:</b> ${(position.speed * 3.6).toFixed(0)}km/h<br>` : ''}
                 ${position?.odometer !== undefined ? `<b>Odometer:</b> ${Number((position.odometer / 1000).toFixed(0)).toLocaleString('en-NZ')} km<br>` : ''}
-                ${vehicleData?.timestamp ? `<b>Last Update:</b> ${getRelativeTime(vehicleData.timestamp * 1000)}` : ''}
+                ${vehicleData?.timestamp ? `<b>Last Update:</b> ${getRelativeTime(vehicleData.timestamp * 1000)}<br>` : ''}
+                ${(() => {
+                    if (stopIds.length === 0) return '';
+                    const stopList = stops.map((s, i) => {
+                        if (!s) return `(${stopIds[i]})<br>`;
+                        const stopName = s.stop_name.replace(/ Station$/, '');
+                        const platform = s.platform_code ? s.platform_code : '';
+                        //if (!platform) {
+                        //    console.warn(`No platform code given for: ${s.stop_name} (${vehicleId})`);
+                        //}
+                        return `<i>- ${stopName} ${platform} (${stopIds[i]})</i><br>`;
+                    }).join('');
+                    return `<b>Stops:</b><br>${stopList}`;
+                })()}
             `;
         }
 
@@ -265,9 +335,13 @@
                     const ageInMs = vehicleData.timestamp ? Date.now() - (vehicleData.timestamp * 1000) : Infinity;
                     const isStale = ageInMs > STALE_TIMEOUT_MS;
                     const trip = vehicleData?.trip;
-                    const routeId = trip?.route_id;
+                    const routeId = trip?.route_id || trip?.routeId;
                     const direction = `-${trip?.direction_id} `;
                     const arrowColor = ROUTE_COLORS[routeId] || DEFAULT_ARROW_COLOR;
+
+                    if (arrowColor === DEFAULT_ARROW_COLOR) {
+                        console.warn(`No route color defined for route ID: ${routeId}`);
+                    }
 
                     if (vehicleId && position?.latitude && position?.longitude) {
                         seenVehicleIds.add(vehicleId);
@@ -281,10 +355,10 @@
                             const marker = vehicleMarkers.get(vehicleId);
                             marker.setLatLng(latLng)
                                 .setIcon(icon)
-                                .setPopupContent(getVehiclePopupContent(vehicleInfo, vehicleId, trip, direction, latitude, longitude, position, vehicleData));
+                                .setPopupContent(getVehiclePopupContent(vehicleInfo, vehicleId, trip, direction, latitude, longitude, position, vehicleData, entity));
                         } else {
                             const marker = L.marker(latLng, { icon })
-                                .bindPopup(getVehiclePopupContent(vehicleInfo, vehicleId, trip, direction, latitude, longitude, position, vehicleData))
+                                .bindPopup(getVehiclePopupContent(vehicleInfo, vehicleId, trip, direction, latitude, longitude, position, vehicleData, entity))
                                 .addTo(map);
                             vehicleMarkers.set(vehicleId, marker);
                         }

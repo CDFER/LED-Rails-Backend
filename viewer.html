@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Viewer</title>
+    <script>
+        // --- Dynamic Title based on URL ---
+        (function() {
+            // Try to extract region from pathname, e.g. /wlg-ltm/api/map or /WLG/api/map
+            const path = window.location.pathname.toLowerCase();
+            const match = path.match(/^\/?([^\/-]+)(?:-ltm)?[^\/]*\/api/);
+            if (match) {
+                const region = match[1].toUpperCase();
+                document.title = region + ' Viewer';
+            }
+        })();
+    </script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #000000;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Make the PCB view full-window */
+        .pcb-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            padding: 0;
+            box-sizing: border-box;
+            display: flex;
+            align-items: stretch;
+        }
+
+        /* SVG container takes full space and clips overflow */
+        #svg-container {
+            flex: 1 1 auto;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            touch-action: none;
+            /* allow pointer events for panning/zooming */
+            background-color: #000000;
+        }
+
+        #history-controls {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 90%;
+            box-sizing: border-box;
+            background: rgba(30, 30, 30, 0.8);
+            padding: 10px 20px;
+            border-radius: 25px;
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            color: white;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            z-index: 1000;
+            backdrop-filter: blur(5px);
+            border: 1px solid #444;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+        
+        #history-controls button {
+            background: #444;
+            color: white;
+            border: none;
+            padding: 5px 12px;
+            border-radius: 15px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background 0.2s;
+        }
+
+        #history-controls button:hover {
+            background: #666;
+        }
+
+        #history-controls button.live-active {
+            background: #00cc00;
+            color: black;
+            box-shadow: 0 0 10px rgba(0, 204, 0, 0.5);
+        }
+
+        #slider-history {
+            min-width: 120px;
+            flex-grow: 1;
+            cursor: pointer;
+        }
+        
+        #history-label {
+            min-width: 30px;
+            text-align: center;
+            font-variant-numeric: tabular-nums;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="pcb-container">
+        <div id="svg-container"></div>
+    </div>
+
+    <div id="history-controls">
+        <button id="btn-prev" title="Previous Update">&lt;</button>
+        <input type="range" id="slider-history" min="0" max="1" value="1">
+        <button id="btn-next" title="Next Update">&gt;</button>
+        <button id="btn-live" class="live-active">Live</button>
+        <span id="history-label">1</span>
+    </div>
+
+    <script>
+        const DEFAULT_COLOR = '#444444';
+        const POS_ENDPOINT = window.location.pathname.replace(/\/api\/viewer/, '/api/positions.csv');
+        const SVG_ENDPOINT = window.location.pathname.replace(/\/api\/viewer/, '/api/pcb.svg');
+        let DATA_ENDPOINT = window.location.pathname.replace(/\/api\/viewer/, '/100.json');
+        if (window.location.pathname.includes('akl')) {
+            DATA_ENDPOINT = window.location.pathname.replace(/\/api\/viewer/, '/110.json');
+        }
+        const DEBUG = true ? window.location.hostname === 'localhost' : false;
+
+        class ComponentPositionParser {
+            constructor() {
+                this.components = new Map();
+                this.svgWidth = 0;
+                this.svgHeight = 0;
+                this.boardWidth = 0;
+                this.boardHeight = 0;
+            }
+
+            async loadPositions() {
+                try {
+                    const response = await fetch(POS_ENDPOINT);
+                    const csvText = await response.text();
+                    this.parseCSV(csvText);
+                    this.calculateBoardDimensions();
+                } catch (error) {
+                    console.error('Error loading positions:', error);
+                }
+            }
+
+            parseCSV(csvText) {
+                const lines = csvText.trim().split('\n');
+                const headers = lines[0].split(',').map(header => header.replace(/"/g, ''));
+
+                for (let i = 1; i < lines.length; i++) {
+                    const values = lines[i].split(',').map(value => value.replace(/"/g, ''));
+                    if (values.length < 7) continue;
+
+                    if (values[0].startsWith('D')) {
+                        const component = {
+                            x: parseFloat(values[3]),
+                            y: this.boardHeight - parseFloat(values[4]),
+                            rot: (360 - parseFloat(values[5]) - 90) % 360, // Kicad uses CCW angles from top
+                        };
+                        const ref_num = Number(values[0].substring(1));
+                        this.components.set(ref_num, component);
+                    }
+                }
+            }
+
+            calculateBoardDimensions() {
+                let minX = Infinity, minY = Infinity;
+                let maxX = -Infinity, maxY = -Infinity;
+
+                for (const [, pos] of this.components) {
+                    minX = Math.min(minX, pos.x);
+                    minY = Math.min(minY, pos.y);
+                    maxX = Math.max(maxX, pos.x);
+                    maxY = Math.max(maxY, pos.y);
+                }
+
+                this.boardWidth = maxX - minX;
+                this.boardHeight = maxY - minY;
+
+                const padding = 5;
+                this.boardWidth += 2 * padding;
+                this.boardHeight += 2 * padding;
+            }
+
+            getPosition(ref_num) {
+                return this.components.get(ref_num) || null;
+            }
+
+            getAllPositions() {
+                return this.components;
+            }
+        }
+
+        // Store references to LED elements
+        const ledElements = new Map();
+
+        // History Management
+        const MAX_HISTORY = 2000;
+        const history = []; 
+        const currentLedState = new Map();
+        let isLive = true;
+        let historyIndex = -1;
+
+        function initHistoryControls() {
+            const slider = document.getElementById('slider-history');
+            const btnPrev = document.getElementById('btn-prev');
+            const btnNext = document.getElementById('btn-next');
+            const btnLive = document.getElementById('btn-live');
+
+            slider.addEventListener('input', (e) => {
+                goHistory(parseInt(e.target.value));
+            });
+
+            btnPrev.addEventListener('click', () => {
+                if (isLive) goHistory(history.length - 2);
+                else goHistory(historyIndex - 1);
+            });
+
+            btnNext.addEventListener('click', () => {
+                if (!isLive) goHistory(historyIndex + 1);
+            });
+
+            btnLive.addEventListener('click', () => {
+                goLive();
+            });
+
+            // Keyboard arrow key support for slider
+            document.addEventListener('keydown', (e) => {
+                // Only act if history controls are visible
+                if (document.activeElement === slider || document.activeElement === document.body) {
+                    if (e.key === 'ArrowLeft') {
+                        if (isLive) {
+                            goHistory(history.length - 2);
+                        } else {
+                            goHistory(historyIndex - 1);
+                        }
+                        e.preventDefault();
+                    } else if (e.key === 'ArrowRight') {
+                        if (!isLive) {
+                            goHistory(historyIndex + 1);
+                        }
+                        e.preventDefault();
+                    }
+                }
+            });
+        }
+
+        function goHistory(index) {
+            if (history.length === 0) return;
+            
+            // Clamp index
+            index = Math.max(0, Math.min(index, history.length - 1));
+            
+            isLive = false;
+            historyIndex = index;
+            
+            // Update UI
+            updateControlsUI();
+            
+            // Render state
+            renderState(history[index]);
+        }
+
+        function goLive() {
+            isLive = true;
+            historyIndex = history.length - 1;
+            updateControlsUI();
+            renderState(currentLedState);
+        }
+
+        function updateControlsUI() {
+            const slider = document.getElementById('slider-history');
+            const label = document.getElementById('history-label');
+            const btnLive = document.getElementById('btn-live');
+
+            slider.max = Math.max(0, history.length - 1);
+            
+            if (isLive) {
+                slider.value = history.length - 1;
+                btnLive.classList.add('live-active');
+                label.textContent = `${history.length}`;
+            } else {
+                slider.value = historyIndex;
+                btnLive.classList.remove('live-active');
+                label.textContent = `${historyIndex + 1}`;
+            }
+        }
+
+        function addToHistory(currentLedState) {
+            setTimeout(() => {
+                // Deep clone the map
+                const snapshot = new Map(currentLedState);
+                history.push(snapshot);
+                
+                if (history.length > MAX_HISTORY) {
+                    history.shift();
+                    // Adjust historyIndex if we are viewing history
+                    if (!isLive) {
+                        historyIndex--;
+                        if (historyIndex < 0) {
+                            historyIndex = 0;
+                            renderState(history[0]);
+                        }
+                    }
+                }
+                
+                updateControlsUI();
+            }, 0);
+        }
+
+        function renderState(stateMap) {
+            for (const [refNum, color] of stateMap) {
+                const ledGroup = ledElements.get(refNum);
+                if (ledGroup) {
+                    const rect = ledGroup.querySelector('.led-rectangle');
+                    if (rect) {
+                        rect.setAttribute('fill', color);
+                    }
+                }
+            }
+        }
+
+        // Store the current API data to track updates
+        let currentAPIData = null;
+        let scheduledUpdateTimeouts = [];
+        let nextFetchTimeout = null;
+        let nextRenderTimeout = null;
+
+        // Function to draw an LED as a rotated rectangle
+        function drawLED(svg, x, y, rotation, color = '#00FF00', text = null, width = 1.5, height = 1.6, refNum = null) {
+            // Create a group for the LED
+            const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+            group.classList.add('led-component');
+
+            // Store reference if refNum provided
+            if (refNum !== null) {
+                group.setAttribute('data-ref', refNum);
+                ledElements.set(refNum, group);
+                currentLedState.set(refNum, color);
+            }
+
+            // Convert mm to user units
+            const w = width;
+            const h = height;
+
+            // Create rectangle centered at (0,0) in group coordinates
+            const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            rect.setAttribute('x', -w / 2);
+            rect.setAttribute('y', -h / 2);
+            rect.setAttribute('width', w);
+            rect.setAttribute('height', h);
+            rect.setAttribute('fill', color);
+            rect.classList.add('led-component');
+            rect.classList.add('led-rectangle'); // Add specific class for easy selection
+
+            // Add the rectangle to the group
+            group.appendChild(rect);
+
+            // Optional: add text label
+            if (text && DEBUG) {
+                const textElem = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                textElem.setAttribute('x', 0);
+                textElem.setAttribute('y', 0);
+                textElem.setAttribute('fill', '#888888');
+                textElem.setAttribute('font-size', '0.8');
+                textElem.setAttribute('font-family', 'Arial, sans-serif');
+                textElem.setAttribute('dominant-baseline', 'middle');
+                textElem.setAttribute('text-anchor', 'middle');
+                textElem.setAttribute('transform', `rotate(${-rotation})`);
+                textElem.textContent = text;
+                textElem.classList.add('led-component');
+                group.appendChild(textElem);
+            }
+
+            // Apply transformation: translate to position, then rotate
+            const transform = `translate(${x},${y}) rotate(${rotation})`;
+            group.setAttribute('transform', transform);
+
+            // Add group to SVG
+            svg.appendChild(group);
+
+            return group; // Return the group element
+        }
+
+        // Function to update LED color
+        function updateLED(refNum, color) {
+            // Only update if color is different
+            if (currentLedState.get(refNum) == color) {
+                return false;
+            }
+
+            //console.log(`Updating LED ${refNum} state = ${currentLedState.get(refNum)} to color ${color}`);
+
+            // Update model
+            currentLedState.set(refNum, color);
+
+            // Only update DOM if we are live
+            if (isLive) {
+                const ledGroup = ledElements.get(refNum);
+                if (ledGroup) {
+                    const rect = ledGroup.querySelector('.led-rectangle');
+                    if (rect) {
+                        rect.setAttribute('fill', color);
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        // Function to get LED element reference
+        function getLED(refNum) {
+            return ledElements.get(refNum);
+        }
+
+        // Function to convert RGB array to hex color
+        function rgbToHex(rgb) {
+            return "#" + rgb.map(x => {
+                const hex = Math.round(x).toString(16);
+                return hex.length === 1 ? "0" + hex : hex;
+            }).join("");
+        }
+
+        // Function to get color by ID from colors map
+        function getColorById(colors, id) {
+            if (colors[id]) {
+                return rgbToHex(colors[id]);
+            }
+            return '#00FF00'; // Default green color
+        }
+
+        // Function to update all LEDs based on API response
+        function updateLEDsFromAPI(apiData) {
+            if (!apiData) return;
+
+            const nowEpochSeconds = Date.now() / 1000;
+            const newActiveLeds = new Map();
+
+            // Apply specific updates
+            if (apiData.updates) {
+                apiData.updates.forEach(update => {
+                    const [postBlock, preBlock] = update.b;
+                    const color = getColorById(apiData.colors, update.c);
+                    const updateTime = update.t + apiData.timestamp;
+
+                    // Update the post block LED (the one that's being activated)
+                    if (postBlock >= 100) {
+                        let targetRef = preBlock;
+                        if (updateTime >= nowEpochSeconds) {
+                            targetRef = postBlock;
+                        }
+
+                        // Only track if it's a valid LED reference
+                        if (targetRef >= 100) {
+                            newActiveLeds.set(targetRef, color);
+                        }
+                    }
+                });
+            }
+
+            // Initialize persistent active set if needed
+            if (!updateLEDsFromAPI.activeRefs) {
+                updateLEDsFromAPI.activeRefs = new Set();
+            }
+
+            const previousRefs = updateLEDsFromAPI.activeRefs;
+
+            // 1. Turn OFF LEDs that were active but are not in the new state
+            for (const refNum of previousRefs) {
+                if (!newActiveLeds.has(refNum)) {
+                    updateLED(refNum, DEFAULT_COLOR);
+                }
+            }
+
+            // 2. Turn ON/Update LEDs in the new state
+            for (const [refNum, color] of newActiveLeds) {
+                updateLED(refNum, color);
+            }
+
+            // Update persistent state
+            updateLEDsFromAPI.activeRefs = new Set(newActiveLeds.keys());
+
+            // Call again in 1 second
+            if (nextRenderTimeout) clearTimeout(nextRenderTimeout);
+            nextRenderTimeout = setTimeout(() => {
+                if (isLive && currentAPIData) {
+                    updateLEDsFromAPI(currentAPIData);
+                }
+            }, 1000);
+        }
+
+        // Schedule next API update
+        function scheduleUpdates(apiData) {
+            if (apiData.update) {
+                const nextFetchTime = (apiData.timestamp + apiData.update) * 1000;
+                const delay = Math.max(0, (nextFetchTime - Date.now()) + ((1+Math.random()) * 1000)); // Add 1000-1999 ms random jitter
+                if (nextFetchTimeout) clearTimeout(nextFetchTimeout);
+                nextFetchTimeout = setTimeout(fetchAndUpdateLEDs, delay);
+            }
+        }
+
+        // Function to fetch and process LED updates from API
+        async function fetchAndUpdateLEDs() {
+            try {
+                const response = await fetch(DATA_ENDPOINT);
+                const apiData = await response.json();
+
+                console.log(`Fetch Delay = ${Date.now() - (apiData.timestamp * 1000)} ms`);
+
+                // Update LEDs immediately
+                updateLEDsFromAPI(apiData);
+
+                // Add to history
+                addToHistory(currentLedState);
+
+                // Schedule future updates
+                scheduleUpdates(apiData);
+
+                // Store current data
+                currentAPIData = apiData;
+
+            } catch (error) {
+                console.error('Error fetching LED updates:', error);
+                // Retry in 30 seconds on error
+                if (nextFetchTimeout) clearTimeout(nextFetchTimeout);
+                nextFetchTimeout = setTimeout(fetchAndUpdateLEDs, 30000);
+            }
+        }
+
+        // Usage example:
+        const positionParser = new ComponentPositionParser();
+
+        positionParser.loadPositions().then(() => {
+            console.log('Board dimensions:', positionParser.boardWidth, 'x', positionParser.boardHeight);
+        });
+
+        fetch(SVG_ENDPOINT)
+            .then(response => response.text())
+            .then(svgText => {
+                const container = document.getElementById('svg-container');
+                container.innerHTML = svgText;
+
+                const svg = container.querySelector('svg');
+                if (svg) {
+                    svg.style.backgroundColor = '#000000';
+                    // Remove all <title> elements to prevent tooltips
+                    svg.querySelectorAll('title').forEach(t => t.remove());
+                    // Prevent default browser tooltips on svg
+                    svg.setAttribute('title', '');
+                    svg.style.pointerEvents = 'auto';
+                    svg.style.userSelect = 'none';
+
+                    const svgRect = svg.getBoundingClientRect();
+                    positionParser.svgWidth = svgRect.width;
+                    positionParser.svgHeight = svgRect.height;
+
+                    // --- Zoom and pan setup (wheel zoom + pointer drag pan) ---
+                    svg.style.transformOrigin = '0 0';
+                    let transform = { x: 0, y: 0, k: 1 };
+                    let evCache = []; 
+                    let prevDiff = -1;
+                    let prevCenter = { x: 0, y: 0 };
+                    let panStart = { x: 0, y: 0 };
+
+                    function updateTransform() {
+                        svg.style.transform = `translate(${transform.x}px, ${transform.y}px) scale(${transform.k})`;
+                        // Update SVG rendering
+                    }
+
+                    const getPointFromEvent = (e) => {
+                        const rect = container.getBoundingClientRect();
+                        return {
+                            x: e.clientX - rect.left,
+                            y: e.clientY - rect.top
+                        };
+                    };
+
+                    container.addEventListener('wheel', (e) => {
+                        e.preventDefault();
+                        const { x, y } = getPointFromEvent(e);
+                        
+                        // Use a smoother zoom factor based on delta magnitude
+                        // Standard mouse wheel delta is usually +/- 100 or +/- 120
+                        // Trackpads can be smaller.
+                        const rawDelta = -e.deltaY;
+                        // Limit delta to avoid huge jumps
+                        const delta = Math.max(-200, Math.min(200, rawDelta));
+                        const factor = Math.exp(delta * 0.002);
+                        
+                        const newScale = Math.min(20, Math.max(0.05, transform.k * factor));
+                        const scaleRatio = newScale / transform.k;
+                        
+                        transform.x = x - (x - transform.x) * scaleRatio;
+                        transform.y = y - (y - transform.y) * scaleRatio;
+                        transform.k = newScale;
+                        updateTransform();
+                    }, { passive: false });
+
+                    function removeEvent(ev) {
+                        const index = evCache.findIndex((cachedEv) => cachedEv.pointerId === ev.pointerId);
+                        if (index > -1) evCache.splice(index, 1);
+                    }
+
+                    container.addEventListener('pointerdown', (ev) => {
+                        evCache.push(ev);
+                        container.setPointerCapture(ev.pointerId);
+                        
+                        if (evCache.length === 1) {
+                            const { x, y } = getPointFromEvent(ev);
+                            panStart.x = x - transform.x;
+                            panStart.y = y - transform.y;
+                        } else if (evCache.length === 2) {
+                            prevDiff = Math.hypot(
+                                evCache[0].clientX - evCache[1].clientX,
+                                evCache[0].clientY - evCache[1].clientY
+                            );
+                            prevCenter = {
+                                x: (evCache[0].clientX + evCache[1].clientX) / 2 - container.getBoundingClientRect().left,
+                                y: (evCache[0].clientY + evCache[1].clientY) / 2 - container.getBoundingClientRect().top
+                            };
+                        }
+                    });
+
+                    container.addEventListener('pointermove', (ev) => {
+                        const index = evCache.findIndex((cachedEv) => cachedEv.pointerId === ev.pointerId);
+                        if (index > -1) evCache[index] = ev;
+
+                        if (evCache.length === 2) {
+                            const curDiff = Math.hypot(
+                                evCache[0].clientX - evCache[1].clientX,
+                                evCache[0].clientY - evCache[1].clientY
+                            );
+                            
+                            const rect = container.getBoundingClientRect();
+                            const curCenter = {
+                                x: (evCache[0].clientX + evCache[1].clientX) / 2 - rect.left,
+                                y: (evCache[0].clientY + evCache[1].clientY) / 2 - rect.top
+                            };
+
+                            if (prevDiff > 0) {
+                                const factor = curDiff / prevDiff;
+                                const newScale = Math.min(20, Math.max(0.05, transform.k * factor));
+                                const scaleRatio = newScale / transform.k; // Actual applied scale ratio
+                                
+                                // Math for simultaneous Pan + Zoom:
+                                // newTx = curCenter - (prevCenter - oldTx) * scaleRatio
+                                transform.x = curCenter.x - (prevCenter.x - transform.x) * scaleRatio;
+                                transform.y = curCenter.y - (prevCenter.y - transform.y) * scaleRatio;
+                                transform.k = newScale;
+                                updateTransform();
+                            }
+                            
+                            prevDiff = curDiff;
+                            prevCenter = curCenter;
+                            
+                        } else if (evCache.length === 1) {
+                            const { x, y } = getPointFromEvent(ev);
+                            transform.x = x - panStart.x;
+                            transform.y = y - panStart.y;
+                            updateTransform();
+                        }
+                    });
+
+                    const resetPinch = (ev) => {
+                        removeEvent(ev);
+                        if (evCache.length < 2) prevDiff = -1;
+                        if (evCache.length === 1) {
+                             const { x, y } = getPointFromEvent(evCache[0]);
+                             panStart.x = x - transform.x;
+                             panStart.y = y - transform.y;
+                        }
+                        // Only release if no pointers left? 
+                        // Actually releasePointerCapture is per pointerId, so it's fine.
+                        try { container.releasePointerCapture(ev.pointerId); } catch (err) {}
+                    };
+
+                    container.addEventListener('pointerup', resetPinch);
+                    container.addEventListener('pointercancel', resetPinch);
+                    // listener for lostpointercapture to be safe, treat like cancel
+                    container.addEventListener('lostpointercapture', resetPinch);
+                    
+                    // Removed pointerout/leave to prevent interruption by child elements
+
+                    // --- end zoom/pan setup ---
+
+                    setTimeout(() => {
+                        const positions = positionParser.getAllPositions();
+                        for (const [refNum, pos] of positions) {
+                            if (refNum >= 100) {
+                                drawLED(svg, pos.x, pos.y, pos.rot, DEFAULT_COLOR, `${refNum}`, 1.5, 1.6, refNum);
+                            }
+                        }
+
+                        // Add initial state to history
+                        addToHistory();
+
+                        // Start fetching LED updates after LEDs are drawn
+                        setTimeout(fetchAndUpdateLEDs, 1000);
+                    }, 100);
+                }
+            })
+            .catch(error => {
+                console.error('Error loading SVG:', error);
+                document.getElementById('svg-container').innerHTML =
+                    '<div style="color: white; text-align: center; padding: 20px;">Failed to load map</div>';
+            });
+            
+        initHistoryControls();
+    </script>
+</body>
+
+</html>

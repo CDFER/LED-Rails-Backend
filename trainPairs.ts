@@ -35,7 +35,7 @@ export interface TrainPair {
 /**
  * Calculates the distance in meters between two geographic coordinates using the Haversine formula.
  */
-function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+export function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
     const R = 6371e3; // Earth's radius in meters
     const phi1 = lat1 * Math.PI / 180;
     const phi2 = lat2 * Math.PI / 180;

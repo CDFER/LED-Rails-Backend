@@ -8,6 +8,7 @@ import path from 'path';
 import { LOG_LABELS, log, safeParseInt } from './customUtils';
 
 import { RailNetwork } from './railNetwork';
+import { time } from 'console';
 
 const PORT = 3000;
 
@@ -16,7 +17,7 @@ const PORT = 3000;
 loadEnv({ quiet: true }); // Load environment variables from .env file
 const DOWNSTREAM_RATE_LIMIT_CONFIG = {
     windowMs: safeParseInt(process.env.RATE_LIMIT_WINDOW_MS, 60 * 1000), // 1 minute
-    maxRequests: safeParseInt(process.env.RATE_LIMIT_MAX, 20), // Limit each IP to 20 requests per `window`
+    maxRequests: safeParseInt(process.env.RATE_LIMIT_MAX, 60), // Limit each IP to 60 requests per `window`
 };
 
 // --- Express Setup ---
@@ -36,7 +37,7 @@ const rateLimiter = rateLimit({
 app.use(rateLimiter);
 
 app.use(compression({
-    threshold: 1024, // Only compress responses larger than 1KB
+    threshold: 1024, // Only compress responses larger than 1KiB
     level: 9, // Max compression for 'compression' middleware
 }));
 
@@ -44,6 +45,8 @@ app.use((_req, res, next) => {
     res.removeHeader('X-Powered-By');
     next();
 });
+
+app.set('etag', false); // Disable http response etags
 
 async function initializeServer() {
     log(LOG_LABELS.SYSTEM, 'Starting', {
@@ -68,83 +71,113 @@ async function initializeServer() {
         network.config.GTFSRealtimeAPI.key = process.env[network.id];
 
         if (!network.config.GTFSRealtimeAPI.key) {
-            throw new Error(`${network.id} API key not found in .env file`);
-        }
+            log(network.id, 'API Key Missing from .env file, skipping setup.');
+            // throw new Error(`${network.id} API key not found in .env file`);
+        } else {
 
-        try {
-            await network.update();
+            try {
+                await network.update();
 
-            // Setup server endpoints for each board revision api
-            network.ledRailsAPIs.forEach(api => {
-                app.get(api.url, (_req, res) => {
-                    res.json(api.output);
-                });
-            });
-
-            // Status endpoint for monitoring
-            app.get(`/${network.id.toLowerCase()}-ltm/status`, (_req, res) => {
-                const now = Date.now();
-                res.json({
-                    status: network.trackedTrains.length ? 'OK' : 'ERROR',
-                    epoch: Math.floor(now / 1000),
-                    uptime: Number(process.uptime().toFixed(0)),
-                    refreshInterval: network.config.GTFSRealtimeAPI.fetchIntervalSeconds,
-                    trackBlocks: network.trackBlocks.size,
-                    entities: network.entities.length,
-                    trackedTrains: network.trackedTrains.length,
-                });
-            });
-
-            // Raw data endpoint for all vehicles
-            app.get(`/${network.id.toLowerCase()}-ltm/api/vehicles`, (_req, res) => {
-                res.json(network.entities);
-            });
-
-            // Raw data endpoint for trains only
-            app.get(`/${network.id.toLowerCase()}-ltm/api/vehicles/trains`, (_req, res) => {
-                res.json(network.trainEntities);
-            });
-
-            app.get(`/${network.id.toLowerCase()}-ltm/api/trackedtrains`, (_req, res) => {
-                res.json(network.trackedTrains);
-            });
-
-            // Simple HTML map view for debugging (serves map.html, currently http only)
-            const mapPath = path.resolve(__dirname, 'map.html');
-            app.get(`/${network.id.toLowerCase()}-ltm/api/map`, (_req, res) => {
-                res.sendFile(mapPath);
-            });
-
-            // Periodic update loop
-            setInterval(() => {
-                try {
-                    network.update();
-                } catch (error) {
-                    log(network.id, 'Error Updating', {
-                        errorMessage: error instanceof Error ? error.message : String(error),
-                        stack: error instanceof Error ? error.stack : undefined
+                // Setup server endpoints for each board revision api
+                network.ledRailsAPIs.forEach(api => {
+                    app.get(api.url, (_req, res) => {
+                        res.json(api.output);
                     });
-                }
-            }, network.config.GTFSRealtimeAPI.fetchIntervalSeconds * 1000);
+                });
 
-            // Log some info about the rail network after setup
-            log(network.id, 'Setup', {
-                trains: network.trackedTrains.length,
-                blocks: network.trackBlocks.size,
-                APIs: network.ledRailsAPIs.length,
-            });
+                // Status endpoint for monitoring
+                app.get(`/${network.id.toLowerCase()}-ltm/status`, (_req, res) => {
+                    const now = Date.now();
+                    res.json({
+                        status: network.trackedTrains.length ? 'OK' : 'ERROR',
+                        epoch: Math.floor(now / 1000),
+                        uptime: Number(process.uptime().toFixed(0)),
+                        refreshInterval: network.config.GTFSRealtimeAPI.fetchIntervalSeconds,
+                        trackBlocks: network.trackBlocks?.size ?? 0,
+                        entities: network.entities.length,
+                        trackedTrains: network.trackedTrains.length,
+                    });
+                });
 
-        } catch (error) {
-            log(network.id, 'Error During Setup', {
-                errorMessage: error instanceof Error ? error.message : String(error),
-                stack: error instanceof Error ? error.stack : undefined
-            });
+                // Raw data endpoint for all vehicles
+                app.get(`/${network.id.toLowerCase()}-ltm/api/vehicles`, (_req, res) => {
+                    res.json(network.entities);
+                });
+
+                // Raw data endpoint for trains only
+                app.get(`/${network.id.toLowerCase()}-ltm/api/vehicles/trains`, (_req, res) => {
+                    res.json(network.trainEntities);
+                });
+
+                app.get(`/${network.id.toLowerCase()}-ltm/api/trackedtrains`, (_req, res) => {
+                    res.json(network.trackedTrains);
+                });
+
+                // stopsMap (To make it easier to map stop IDs to names/platforms)
+                app.get(`/${network.id.toLowerCase()}-ltm/api/stops`, (_req, res) => {
+                    res.json(network.stopsMap);
+                });
+
+                // Simple HTML map view for debugging (serves map.html, currently http only)
+                const mapPath = path.resolve(__dirname, 'map.html');
+                app.get(`/${network.id.toLowerCase()}-ltm/api/map`, (_req, res) => {
+                    res.sendFile(mapPath);
+                });
+
+                // Simple HTML viewer for the PCB
+                const viewerPath = path.resolve(__dirname, 'viewer.html');
+                app.get(`/${network.id.toLowerCase()}-ltm/api/viewer`, (_req, res) => {
+                    res.sendFile(viewerPath);
+                });
+
+                // Position csv File for LEDs 
+                const posPath = path.resolve(__dirname, 'railNetworks', network.id, 'positions.csv');
+                app.get(`/${network.id.toLowerCase()}-ltm/api/positions.csv`, (_req, res) => {
+                    res.sendFile(posPath);
+                });
+
+                // PCB silkscreen svg File
+                const svgPath = path.resolve(__dirname, 'railNetworks', network.id, 'pcb.svg');
+                app.get(`/${network.id.toLowerCase()}-ltm/api/pcb.svg`, (_req, res) => {
+                    res.sendFile(svgPath);
+                });
+
+                // Periodic update loop
+                setInterval(() => {
+                    try {
+                        network.update();
+                    } catch (error) {
+                        log(network.id, 'Error Updating', {
+                            errorMessage: error instanceof Error ? error.message : String(error),
+                            stack: error instanceof Error ? error.stack : undefined
+                        });
+                    }
+                }, network.config.GTFSRealtimeAPI.fetchIntervalSeconds * 1000);
+
+                // Log some info about the rail network after setup
+                log(network.id, 'Setup', {
+                    trains: network.trackedTrains.length,
+                    blocks: network.trackBlocks?.size ?? 0,
+                    APIs: network.ledRailsAPIs.length,
+                });
+
+            } catch (error) {
+                log(network.id, 'Error During Setup', {
+                    errorMessage: error instanceof Error ? error.message : String(error),
+                    stack: error instanceof Error ? error.stack : undefined
+                });
+            }
         }
     }
 
     // Basic root endpoint
     app.get('/', (_req, res) => {
         res.type('text/plain').send('LED-Rails Backend Server is operational.');
+    });
+
+    const faviconPath = path.resolve(__dirname, 'favicon.png');
+    app.get('/favicon.ico', (_req, res) => {
+        res.sendFile(faviconPath);
     });
 
     app.listen(PORT, () => {

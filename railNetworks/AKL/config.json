@@ -1,9 +1,10 @@
 {
   "GTFSRealtimeAPI": {
-    "url": "https://api.at.govt.nz/realtime/legacy",
+    "url": ["https://api.at.govt.nz/realtime/legacy"],
     "keyHeader": "Ocp-Apim-Subscription-Key",
     "fetchIntervalSeconds": 19,
-    "format": "GTFSRealtime"
+    "format": "GTFSRealtime",
+    "protocol": "protobuf"
   },
   "trainFilter": {
     "entityID": {
@@ -14,7 +15,8 @@
   "processingOptions": {
     "pairTrains": true,
     "cacheGTFS": true,
-    "cacheIntervalSeconds": 259
+    "cacheIntervalSeconds": 259,
+    "displayThreshold": 900
   },
   "trackBlocks": {
     "fileName": "trackBlocks.kml"
@@ -30,7 +32,6 @@
       },
       { "version": "110" }
     ],
-    "displayThreshold": 900,
     "colors": {
       "OUT-OF-SERVICE": [223, 0, 223],
       "WEST-201": [0, 255, 0],

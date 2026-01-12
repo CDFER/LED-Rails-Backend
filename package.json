@@ -14,7 +14,8 @@
     "dotenv": "^17.2.2",
     "express": "^5.1.0",
     "express-rate-limit": "^8.1.0",
-    "gtfs-types": "^5.1.0"
+    "gtfs-types": "^5.1.0",
+    "protobufjs": "^7.5.4"
   },
   "devDependencies": {
     "@eslint/js": "^9.35.0",
