@@ -497,12 +497,15 @@
 
         // Schedule next API update
         function scheduleUpdates(apiData) {
+            let delay = 15000; // Default to 15 seconds (in case no update info)
             if (apiData.update) {
                 const nextFetchTime = (apiData.timestamp + apiData.update) * 1000;
-                const delay = Math.max(0, (nextFetchTime - Date.now()) + ((1+Math.random()) * 1000)); // Add 1000-1999 ms random jitter
-                if (nextFetchTimeout) clearTimeout(nextFetchTimeout);
-                nextFetchTimeout = setTimeout(fetchAndUpdateLEDs, delay);
+                delay = Math.max(0, (nextFetchTime - Date.now()) + ((1+Math.random()) * 1000)); // Add 1000-1999 ms random jitter
             }
+
+            if (delay < 6000) delay = 6000; // Minimum 6 seconds between fetches (to avoid hammering)
+            if (nextFetchTimeout) clearTimeout(nextFetchTimeout);
+            nextFetchTimeout = setTimeout(fetchAndUpdateLEDs, delay);
         }
 
         // Function to fetch and process LED updates from API
@@ -527,9 +530,9 @@
 
             } catch (error) {
                 console.error('Error fetching LED updates:', error);
-                // Retry in 30 seconds on error
+                // Retry in 15 seconds on error
                 if (nextFetchTimeout) clearTimeout(nextFetchTimeout);
-                nextFetchTimeout = setTimeout(fetchAndUpdateLEDs, 30000);
+                nextFetchTimeout = setTimeout(fetchAndUpdateLEDs, 15000);
             }
         }
 

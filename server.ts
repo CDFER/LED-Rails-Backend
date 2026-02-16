@@ -1,54 +1,26 @@
-import express from 'express';
-import compression from 'compression';
 import { config as loadEnv } from 'dotenv';
-import rateLimit from 'express-rate-limit';
 import { promises as fs } from 'fs';
 import path from 'path';
 
-import { LOG_LABELS, log, safeParseInt } from './customUtils';
+import { LOG_LABELS, log } from './customUtils';
 
 import { RailNetwork } from './railNetwork';
-import { time } from 'console';
 
 const PORT = 3000;
 
 // --- Configuration Loading ---
 
 loadEnv({ quiet: true }); // Load environment variables from .env file
-const DOWNSTREAM_RATE_LIMIT_CONFIG = {
-    windowMs: safeParseInt(process.env.RATE_LIMIT_WINDOW_MS, 60 * 1000), // 1 minute
-    maxRequests: safeParseInt(process.env.RATE_LIMIT_MAX, 60), // Limit each IP to 60 requests per `window`
-};
 
-// --- Express Setup ---
-const app = express();
-
-const rateLimiter = rateLimit({
-    windowMs: DOWNSTREAM_RATE_LIMIT_CONFIG.windowMs,
-    limit: DOWNSTREAM_RATE_LIMIT_CONFIG.maxRequests,
-    standardHeaders: false,
-    legacyHeaders: false,
-    ipv6Subnet: 64, // Rate limit per individual IPv6 address (otherwise /56 would share a limit which is too broad for NZ)
-    message: {
-        status: 429,
-        error: 'Too many requests - please try again later',
-    },
-});
-app.use(rateLimiter);
-
-app.use(compression({
-    threshold: 1024, // Only compress responses larger than 1KiB
-    level: 9, // Max compression for 'compression' middleware
-}));
-
-app.use((_req, res, next) => {
-    res.removeHeader('X-Powered-By');
-    next();
-});
-
-app.set('etag', false); // Disable http response etags
+// --- Type Definitions ---
+type RouteHandler = (req: Request) => Response | Promise<Response>;
 
 async function initializeServer() {
+    const routes = new Map<string, RouteHandler>();
+    const addRoute = (method: string, url: string, handler: RouteHandler) => {
+        if (method === 'GET') routes.set(url, handler);
+    };
+
     log(LOG_LABELS.SYSTEM, 'Starting', {
         env: process.env.NODE_ENV || 'development',
         bunVersion: Bun.version,
@@ -80,15 +52,15 @@ async function initializeServer() {
 
                 // Setup server endpoints for each board revision api
                 network.ledRailsAPIs.forEach(api => {
-                    app.get(api.url, (_req, res) => {
-                        res.json(api.output);
-                    });
+                    addRoute('GET', api.url, () => Response.json(api.output));
                 });
 
+                const prefix = `/${network.id.toLowerCase()}-ltm`;
+
                 // Status endpoint for monitoring
-                app.get(`/${network.id.toLowerCase()}-ltm/status`, (_req, res) => {
+                addRoute('GET', `${prefix}/status`, () => {
                     const now = Date.now();
-                    res.json({
+                    return Response.json({
                         status: network.trackedTrains.length ? 'OK' : 'ERROR',
                         epoch: Math.floor(now / 1000),
                         uptime: Number(process.uptime().toFixed(0)),
@@ -100,47 +72,41 @@ async function initializeServer() {
                 });
 
                 // Raw data endpoint for all vehicles
-                app.get(`/${network.id.toLowerCase()}-ltm/api/vehicles`, (_req, res) => {
-                    res.json(network.entities);
-                });
+                addRoute('GET', `${prefix}/api/vehicles`, () => Response.json(network.entities));
 
                 // Raw data endpoint for trains only
-                app.get(`/${network.id.toLowerCase()}-ltm/api/vehicles/trains`, (_req, res) => {
-                    res.json(network.trainEntities);
-                });
+                addRoute('GET', `${prefix}/api/vehicles/trains`, () => Response.json(network.trainEntities));
 
-                app.get(`/${network.id.toLowerCase()}-ltm/api/trackedtrains`, (_req, res) => {
-                    res.json(network.trackedTrains);
-                });
+                addRoute('GET', `${prefix}/api/trackedtrains`, () => Response.json(network.trackedTrains));
 
                 // stopsMap (To make it easier to map stop IDs to names/platforms)
-                app.get(`/${network.id.toLowerCase()}-ltm/api/stops`, (_req, res) => {
-                    res.json(network.stopsMap);
-                });
+                if (network.stopsMap){
+                    addRoute('GET', `${prefix}/api/stops`, () => Response.json(network.stopsMap));
+                }
 
                 // Simple HTML map view for debugging (serves map.html, currently http only)
                 const mapPath = path.resolve(__dirname, 'map.html');
-                app.get(`/${network.id.toLowerCase()}-ltm/api/map`, (_req, res) => {
-                    res.sendFile(mapPath);
-                });
+                addRoute('GET', `${prefix}/api/map`, () => new Response(Bun.file(mapPath), {
+                    headers: { "Content-Type": "text/html" }
+                }));
 
                 // Simple HTML viewer for the PCB
                 const viewerPath = path.resolve(__dirname, 'viewer.html');
-                app.get(`/${network.id.toLowerCase()}-ltm/api/viewer`, (_req, res) => {
-                    res.sendFile(viewerPath);
-                });
+                addRoute('GET', `${prefix}/api/viewer`, () => new Response(Bun.file(viewerPath), {
+                    headers: { "Content-Type": "text/html" }
+                }));
 
                 // Position csv File for LEDs 
                 const posPath = path.resolve(__dirname, 'railNetworks', network.id, 'positions.csv');
-                app.get(`/${network.id.toLowerCase()}-ltm/api/positions.csv`, (_req, res) => {
-                    res.sendFile(posPath);
-                });
+                addRoute('GET', `${prefix}/api/positions.csv`, () => new Response(Bun.file(posPath), {
+                    headers: { "Content-Type": "text/csv" }
+                }));
 
                 // PCB silkscreen svg File
                 const svgPath = path.resolve(__dirname, 'railNetworks', network.id, 'pcb.svg');
-                app.get(`/${network.id.toLowerCase()}-ltm/api/pcb.svg`, (_req, res) => {
-                    res.sendFile(svgPath);
-                });
+                addRoute('GET', `${prefix}/api/pcb.svg`, () => new Response(Bun.file(svgPath), {
+                    headers: { "Content-Type": "image/svg+xml" }
+                }));
 
                 // Periodic update loop
                 setInterval(() => {
@@ -171,20 +137,62 @@ async function initializeServer() {
     }
 
     // Basic root endpoint
-    app.get('/', (_req, res) => {
-        res.type('text/plain').send('LED-Rails Backend Server is operational.');
-    });
+    addRoute('GET', '/', () => new Response('LED-Rails Backend Server is operational.', {
+        headers: { 'Content-Type': 'text/plain' }
+    }));
 
     const faviconPath = path.resolve(__dirname, 'favicon.png');
-    app.get('/favicon.ico', (_req, res) => {
-        res.sendFile(faviconPath);
+    addRoute('GET', '/favicon.ico', () => new Response(Bun.file(faviconPath)));
+
+    Bun.serve({
+        port: PORT,
+        development: process.env.NODE_ENV !== "production",
+        async fetch(req) {
+            const url = new URL(req.url);
+            const handler = routes.get(url.pathname);
+
+            let response: Response;
+            if (handler && req.method === 'GET') {
+                response = await handler(req);
+            } else {
+                response = new Response("Not Found", { status: 404 });
+            }
+
+            // Simple Compression Middleware
+            // Order of preference: zstd > brotli > gzip > deflate
+            const acceptEncoding = req.headers.get("Accept-Encoding") ?? "";
+
+            // Note: TypeScript might complain about "zstd" or "brotli" if using standard DOM types, but Bun supports them at runtime.
+            let compressionFormat: CompressionFormat | "zstd" | "brotli" | null = null;
+            if (acceptEncoding.includes("zstd")) {
+                compressionFormat = "zstd";
+            } else if (acceptEncoding.includes("br")) {
+                compressionFormat = "brotli";
+            } else if (acceptEncoding.includes("gzip")) {
+                compressionFormat = "gzip";
+            } else if (acceptEncoding.includes("deflate")) {
+                compressionFormat = "deflate";
+            }
+
+            if (compressionFormat && response.body) {
+                const headers = new Headers(response.headers);
+                headers.set("Content-Encoding", compressionFormat === "brotli" ? "br" : compressionFormat);
+                headers.delete("Content-Length");
+
+                return new Response(response.body.pipeThrough(new CompressionStream(compressionFormat as CompressionFormat)), {
+                    status: response.status,
+                    statusText: response.statusText,
+                    headers,
+                });
+            }
+
+            return response;
+        },
     });
 
-    app.listen(PORT, () => {
-        log(LOG_LABELS.SERVER, 'Started', {
-            port: PORT,
-            startup: (process.uptime() * 1000).toFixed(0) + 'ms',
-        });
+    log(LOG_LABELS.SERVER, 'Started', {
+        port: PORT,
+        startup: (process.uptime() * 1000).toFixed(0) + 'ms',
     });
 }
 

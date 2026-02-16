@@ -3,8 +3,7 @@
     "url": ["https://api.at.govt.nz/realtime/legacy"],
     "keyHeader": "Ocp-Apim-Subscription-Key",
     "fetchIntervalSeconds": 19,
-    "format": "GTFSRealtime",
-    "protocol": "protobuf"
+    "format": "GTFSRealtime"
   },
   "trainFilter": {
     "entityID": {

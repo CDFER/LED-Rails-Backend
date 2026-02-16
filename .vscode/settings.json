@@ -10,7 +10,8 @@
         "NIMT",
         "Placemark",
         "placemarks",
-        "trackblock"
+        "trackblock",
+        "trackedtrains"
     ],
     // The path to the `bun` executable.
     "bun.runtime": "node_modules/bun/bin/bun",

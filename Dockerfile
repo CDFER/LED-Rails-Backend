@@ -1,9 +1,8 @@
 # Dockerfile
-FROM oven/bun:1.2.21-alpine AS base
+FROM oven/bun:1.3.9-alpine AS base
 WORKDIR /usr/src/app
 
 # install dependencies into temp directory
-# this will cache them and speed up future builds
 FROM base AS install
 RUN mkdir -p /temp/dev
 COPY package.json bun.lock /temp/dev/
@@ -20,17 +19,22 @@ FROM base AS prerelease
 WORKDIR /usr/src/app
 COPY --from=install /temp/dev/node_modules node_modules
 COPY . . 
-# ^ This copies server.ts, trackBlocks.ts, trackBlocks.kml, etc. to the WORKDIR
 
 # copy production dependencies and source code into final image
 FROM base AS release
 WORKDIR /usr/src/app
-COPY --from=install /temp/prod/node_modules node_modules
-COPY --from=prerelease /usr/src/app .
 
-# run the app
+# 1. Copy only production modules
+COPY --from=install /temp/prod/node_modules node_modules
+
+# 2. Copy source code FROM THE CURRENT CONTEXT (User's machine)
+#    This respects .dockerignore and avoids copying the heavy prerelease folder
+COPY . .
+
+# 3. Setup cache folder
 USER root
 RUN mkdir -p /usr/src/app/cache && chown bun:bun /usr/src/app/cache
 USER bun
+
 EXPOSE 3000/tcp
 ENTRYPOINT [ "bun", "run", "server.ts" ]
