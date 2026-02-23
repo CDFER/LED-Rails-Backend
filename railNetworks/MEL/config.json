@@ -13,7 +13,7 @@
     "pairTrains": false,
     "mapStopsToPlatforms": true,
     "displayThreshold": 240,
-    "removeStaleVehiclesHours": 1,
+    "removeStaleVehiclesHours": 168,
     "cacheGTFS": true,
     "cacheIntervalSeconds": 360
   },

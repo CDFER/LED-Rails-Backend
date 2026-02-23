@@ -289,21 +289,15 @@ export class RailNetwork {
         }
 
         if (this.config.GTFSRealtimeAPI.tripsUrl && tripResponses.length > 0) {
-            const allTripEntities: Entity[] = [];
-            for (const response of tripResponses) {
-                if (response?.entity) {
-                    allTripEntities.push(...response.entity);
-                }
-            }
-
-            // Combine "stopTimeUpdate" from trips into positions based on ID
-            if (allPositionEntities.length > 0 && allTripEntities.length > 0) {
-                allPositionEntities.forEach(positionEntity => {
-                    const tripEntity = allTripEntities.find(t => t.id === positionEntity.id);
-                    if (tripEntity?.tripUpdate?.stopTimeUpdate) {
-                        positionEntity.tripUpdate = tripEntity.tripUpdate;
+            for (const tripBatch of tripResponses) {
+                if (tripBatch?.entity) {
+                    for (const tripEntity of tripBatch.entity) {
+                        const matchingPositionEntity = allPositionEntities.find(posEntity => posEntity?.vehicle?.trip?.tripId === tripEntity?.tripUpdate?.trip?.tripId);
+                        if (matchingPositionEntity && tripEntity.tripUpdate) {
+                            matchingPositionEntity.tripUpdate = tripEntity.tripUpdate;
+                        }
                     }
-                });
+                }
             }
         }
 

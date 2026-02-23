@@ -322,6 +322,7 @@
                 const response = await fetch(API_ENDPOINT);
                 const vehicleEntities = await response.json();
                 const seenVehicleIds = new Set();
+                let staleCount = 0;
 
                 vehicleEntities.forEach(entity => {
                     const vehicleData = entity?.vehicle;
@@ -346,8 +347,11 @@
                         seenVehicleIds.add(vehicleId);
                         const latLng = [position.latitude, position.longitude];
                         const icon = createArrowIcon(position.bearing, isStale, arrowColor);
-                        if (vehicleInfo?.label) {
-                            vehicleLabels.set(vehicleInfo.label.toLowerCase(), vehicleId);
+                        
+                        // Use label if available, otherwise fallback to ID. Some feeds don't provide a label.
+                        const searchLabel = vehicleInfo?.label || vehicleId;
+                        if (searchLabel) {
+                            vehicleLabels.set(searchLabel.toLowerCase(), vehicleId);
                         }
 
                         if (vehicleMarkers.has(vehicleId)) {
@@ -360,6 +364,10 @@
                                 .bindPopup(getVehiclePopupContent(vehicleInfo, vehicleId, trip, direction, latitude, longitude, position, vehicleData, entity))
                                 .addTo(map);
                             vehicleMarkers.set(vehicleId, marker);
+                        }
+
+                        if (isStale) {
+                            staleCount++;
                         }
                     }
                 });
@@ -378,7 +386,7 @@
                     }
                 });
 
-                STATUS_ELEMENT.textContent = `${vehicleMarkers.size} Vehicles`;
+                STATUS_ELEMENT.textContent = `${vehicleMarkers.size} (${vehicleMarkers.size-staleCount} active)`;
             } catch (error) {
                 console.error('Vehicle Error:', error);
                 STATUS_ELEMENT.textContent = `Error: ${error.message}`;
