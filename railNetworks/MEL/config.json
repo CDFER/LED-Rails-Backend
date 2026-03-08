@@ -5,14 +5,14 @@
     "tripsUrl": ["https://api.opendata.transport.vic.gov.au/opendata/public-transport/gtfs/realtime/v1/metro/trip-updates",
                  "https://api.opendata.transport.vic.gov.au/opendata/public-transport/gtfs/realtime/v1/vline/trip-updates"],
     "keyHeader": "KeyId",
-    "fetchIntervalSeconds": 30,
+    "fetchIntervalSeconds": 15,
     "format": "GTFSRealtime",
     "protocol": "protobuf"
   },
   "processingOptions": {
     "pairTrains": false,
     "mapStopsToPlatforms": true,
-    "displayThreshold": 240,
+    "displayThreshold": 300,
     "removeStaleVehiclesHours": 168,
     "cacheGTFS": true,
     "cacheIntervalSeconds": 360

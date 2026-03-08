@@ -7,7 +7,7 @@
     <title>Map</title>
     <script>
         // --- Dynamic Title based on URL ---
-        (function() {
+        (function () {
             // Try to extract region from pathname, e.g. /wlg-ltm/api/map or /WLG/api/map
             const path = window.location.pathname.toLowerCase();
             const match = path.match(/^\/?([^\/-]+)(?:-ltm)?[^\/]*\/api/);
@@ -109,7 +109,7 @@
         }
 
         #search-results {
-            max-height: 180px;
+            max-height: calc(100vh - 60px);
             overflow-y: auto;
             font-size: 0.95em;
         }
@@ -117,6 +117,12 @@
         #search-results div {
             cursor: pointer;
             padding: 2px 0;
+        }
+
+        #search-results div.stale {
+            font-style: italic;
+            opacity: 0.6;
+            color: #666;
         }
     </style>
 </head>
@@ -145,19 +151,28 @@
 
         // --- Relative Time Formatter ---
         function getRelativeTime(timestamp) {
-            const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });
             const diff = Date.now() - timestamp;
+            const absDiff = Math.abs(diff);
+
+            if (absDiff < 60 * 60 * 1000) {
+                const minutes = Math.floor(absDiff / 60000);
+                const seconds = Math.floor((absDiff % 60000) / 1000);
+                if (minutes === 0) {
+                    return `${seconds}s ago`;
+                }
+                return `${minutes}m ${seconds}s ago`;
+            }
+
+            const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });
             const units = [
                 { unit: 'year', ms: 365 * 24 * 60 * 60 * 1000 },
                 { unit: 'month', ms: 28 * 24 * 60 * 60 * 1000 },
                 { unit: 'week', ms: 7 * 24 * 60 * 60 * 1000 },
                 { unit: 'day', ms: 24 * 60 * 60 * 1000 },
                 { unit: 'hour', ms: 60 * 60 * 1000 },
-                { unit: 'minute', ms: 60 * 1000 },
-                { unit: 'second', ms: 1000 },
             ];
             for (const { unit, ms } of units) {
-                if (Math.abs(diff) >= ms || unit === 'second') {
+                if (absDiff >= ms) {
                     const value = Math.floor(diff / ms);
                     return rtf.format(-value, unit);
                 }
@@ -240,11 +255,28 @@
         function updateSearchResults(query) {
             searchResults.innerHTML = '';
             if (!query) return;
+
+            let filterFn;
+            if (query.includes('*')) {
+                const parts = query.split('*').map(s => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&'));
+                const regex = new RegExp(parts.join('.*'), 'i');
+                filterFn = ([label]) => regex.test(label);
+            } else {
+                const upperQuery = query.toUpperCase();
+                filterFn = ([label]) => label.includes(upperQuery);
+            }
+
             const matches = Array.from(vehicleLabels.entries())
-                .filter(([label]) => label.includes(query.toLowerCase()));
-            matches.slice(0, 10).forEach(([label, vehicleId]) => {
+                .filter(filterFn)
+                .sort((a, b) => (b[1].timestamp || 0) - (a[1].timestamp || 0));
+
+            matches.forEach(([label, data]) => {
+                const vehicleId = data.id;
                 const div = document.createElement('div');
                 div.textContent = label;
+                if (data.isStale) {
+                    div.className = 'stale';
+                }
                 div.onclick = () => {
                     const marker = vehicleMarkers.get(vehicleId);
                     if (marker) {
@@ -287,7 +319,7 @@
             const stopIds = entity.tripUpdate?.stopTimeUpdate?.map(stu => stu.stopId) || [];
             const stops = stopsMap ? stopIds.map(id => stopsMap[id]) : [];
             return `
-                ${vehicleInfo?.label ? `<b>Label:</b> ${vehicleInfo.label}<br>` : ''}
+                ${vehicleInfo?.label ? `<b>Label:</b> ${toUpperCase(vehicleInfo.label)}<br>` : ''}
                 ${vehicleId ? `<b>Vehicle ID:</b> ${vehicleId}<br>` : ''}
                 ${trip?.route_id ? `<b>Route:</b> ${trip.route_id + (direction || '')}<br>` : ''}
                 ${trip?.routeId ? `<b>Route:</b> ${trip.routeId}<br>` : ''}
@@ -298,17 +330,32 @@
                 ${position?.bearing !== undefined ? `<b>Bearing:</b> ${Number(position.bearing).toFixed(0)}°<br>` : ''}
                 ${position?.speed !== undefined ? `<b>Speed:</b> ${(position.speed * 3.6).toFixed(0)}km/h<br>` : ''}
                 ${position?.odometer !== undefined ? `<b>Odometer:</b> ${Number((position.odometer / 1000).toFixed(0)).toLocaleString('en-NZ')} km<br>` : ''}
-                ${vehicleData?.timestamp ? `<b>Last Update:</b> ${getRelativeTime(vehicleData.timestamp * 1000)}<br>` : ''}
+                ${vehicleData?.timestamp ? `<b>Last Update:</b> <span class="live-relative-time" data-timestamp="${vehicleData.timestamp * 1000}">${getRelativeTime(vehicleData.timestamp * 1000)}</span><br>` : ''}
                 ${(() => {
                     if (stopIds.length === 0) return '';
                     const stopList = stops.map((s, i) => {
                         if (!s) return `(${stopIds[i]})<br>`;
                         const stopName = s.stop_name.replace(/ Station$/, '');
                         const platform = s.platform_code ? s.platform_code : '';
+                        const arrivalTs = entity.tripUpdate?.stopTimeUpdate?.[i]?.arrival?.time;
+                        const departureTs = entity.tripUpdate?.stopTimeUpdate?.[i]?.departure?.time;
+
+                        let timeString = '';
+                        const formatTime = (ts) => new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+
+                        if (arrivalTs && departureTs && arrivalTs !== departureTs) {
+                            const diff = departureTs - arrivalTs;
+                            timeString = `- ${formatTime(arrivalTs)} (+${diff}s)`;
+                        } else if (arrivalTs) {
+                            timeString = `- ${formatTime(arrivalTs)}`;
+                        } else if (departureTs) {
+                            timeString = `- ${formatTime(departureTs)}`;
+                        }
+
                         //if (!platform) {
                         //    console.warn(`No platform code given for: ${s.stop_name} (${vehicleId})`);
                         //}
-                        return `<i>- ${stopName} ${platform} (${stopIds[i]})</i><br>`;
+                        return `<i>- ${stopName} ${platform} (${stopIds[i]}) ${timeString}</i><br>`;
                     }).join('');
                     return `<b>Stops:</b><br>${stopList}`;
                 })()}
@@ -347,20 +394,24 @@
                         seenVehicleIds.add(vehicleId);
                         const latLng = [position.latitude, position.longitude];
                         const icon = createArrowIcon(position.bearing, isStale, arrowColor);
-                        
+
                         // Use label if available, otherwise fallback to ID. Some feeds don't provide a label.
                         const searchLabel = vehicleInfo?.label || vehicleId;
                         if (searchLabel) {
-                            vehicleLabels.set(searchLabel.toLowerCase(), vehicleId);
+                            vehicleLabels.set(searchLabel.toUpperCase(), { id: vehicleId, timestamp: vehicleData.timestamp, isStale: isStale });
                         }
+
+                        // Use timestamp as zIndexOffset so newer updates appear on top
+                        const zOffset = vehicleData.timestamp || 0;
 
                         if (vehicleMarkers.has(vehicleId)) {
                             const marker = vehicleMarkers.get(vehicleId);
                             marker.setLatLng(latLng)
                                 .setIcon(icon)
+                                .setZIndexOffset(zOffset)
                                 .setPopupContent(getVehiclePopupContent(vehicleInfo, vehicleId, trip, direction, latitude, longitude, position, vehicleData, entity));
                         } else {
-                            const marker = L.marker(latLng, { icon })
+                            const marker = L.marker(latLng, { icon, zIndexOffset: zOffset })
                                 .bindPopup(getVehiclePopupContent(vehicleInfo, vehicleId, trip, direction, latitude, longitude, position, vehicleData, entity))
                                 .addTo(map);
                             vehicleMarkers.set(vehicleId, marker);
@@ -386,7 +437,7 @@
                     }
                 });
 
-                STATUS_ELEMENT.textContent = `${vehicleMarkers.size} (${vehicleMarkers.size-staleCount} active)`;
+                STATUS_ELEMENT.textContent = `${vehicleMarkers.size} (${vehicleMarkers.size - staleCount} active)`;
             } catch (error) {
                 console.error('Vehicle Error:', error);
                 STATUS_ELEMENT.textContent = `Error: ${error.message}`;
@@ -396,6 +447,20 @@
         // --- Initial Fetch and Periodic Refresh ---
         fetchAndDisplayVehicles(); // Initial load
         setInterval(fetchAndDisplayVehicles, REFRESH_INTERVAL_MS); // Refresh periodically
+
+        document.addEventListener("visibilitychange", () => {
+            if (document.visibilityState === "visible") {
+                fetchAndDisplayVehicles();
+            }
+        });
+
+        // --- Live Update of Relative Times ---
+        setInterval(() => {
+            document.querySelectorAll('.live-relative-time').forEach(el => {
+                const ts = parseInt(el.getAttribute('data-timestamp'));
+                if (ts) el.textContent = getRelativeTime(ts);
+            });
+        }, 1000);
 
     </script>
 

@@ -9,7 +9,6 @@ import { RailNetwork } from './railNetwork';
 const PORT = 3000;
 
 // --- Configuration Loading ---
-
 loadEnv({ quiet: true }); // Load environment variables from .env file
 
 // --- Type Definitions ---

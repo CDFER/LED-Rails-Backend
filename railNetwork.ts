@@ -365,7 +365,7 @@ export class RailNetwork {
         for (let index = 0; index < this.ledRailsAPIs.length; index++) {
             const api = this.ledRailsAPIs[index];
             if (api) {
-                this.ledRailsAPIs[index] = generateLedMap(api, this.trackedTrains, this.invisibleTrains);
+                this.ledRailsAPIs[index] = generateLedMap(api, this.trackedTrains, this.invisibleTrains, this.trackBlocks);
             }
         }
     }
@@ -393,16 +393,11 @@ export class RailNetwork {
      */
     async removeStaleVehicles() {
         const now = Date.now();
-        let removedCount = 0;
-        let activeCount = 0;
         this.entities = this.entities.filter(entity => {
             const vehicleTimestamp = entity.vehicle?.timestamp ? entity.vehicle.timestamp * 1000 : 0;
             const ageMs = now - vehicleTimestamp;
             const isFresh = ageMs <= this.config.processingOptions.removeStaleVehiclesHours * 3600 * 1000;
-            if (!isFresh) removedCount++;
-            else if (ageMs < (this.config.processingOptions.displayThreshold * 1000)) activeCount++;
             return isFresh;
         });
-        // log(this.id, `Removed ${removedCount} stale vehicles, ${activeCount} active vehicles`);
     }
 }

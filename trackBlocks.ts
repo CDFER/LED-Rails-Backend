@@ -44,6 +44,7 @@ interface TrackBlock {
     blockNumber: number;                // Track block number (ref from pcb) (e.g., D302 is 302)
     platforms: Platform[] | undefined;  // Array of platforms associated with this block
     altBlock: number | undefined;       // Alternative block number (can be used if multiple trains are same block)
+    displayThreshold: number | undefined; // Optional display threshold in seconds
     name: string;                       // Name of the KML Placemark (e.g. "302 - Parnell")
     priority: boolean;                  // Indicates if trains should be put in this block first when blocks overlap
     polygon: Array<[number, number]>;   // Array of [latitude, longitude] tuples
@@ -179,6 +180,7 @@ export function loadTrackBlocks(cityID: string, filePath: string) {
 
             // Extracts the first sequence of digits from the ID to use as the block number.
             let priority = false;
+            let displayThreshold: number | undefined;
             let blockNumber: number;
             let altBlock: number | undefined;
             let routes: string[] | undefined;
@@ -206,6 +208,12 @@ export function loadTrackBlocks(cityID: string, filePath: string) {
                 routes = routesMatch[1].split(',').map(s => s.trim()).filter(Boolean);
             }
 
+            // Parse displayThreshold from {TIME>N}
+            const thresholdMatch = id.match(/\{TIME<\s*(\d+)\}/);
+            if (thresholdMatch && thresholdMatch[1]) {
+                displayThreshold = parseInt(thresholdMatch[1], 10);
+            }
+
             // Parse priority from presence of a group of letters (>=3) anywhere in the ID
             const nameMatch = id.match(/[a-zA-Z]{3,}/);
             if (nameMatch) {
@@ -227,6 +235,7 @@ export function loadTrackBlocks(cityID: string, filePath: string) {
                 if (points.length > 0) {
                     loadedBlocks.push({
                         name: id,
+                        displayThreshold,
                         blockNumber,
                         platforms: platforms.length > 0 ? platforms : undefined,
                         altBlock,
@@ -341,6 +350,38 @@ function calculatedSpeed(lat1: number, lon1: number, lat2: number, lon2: number,
 }
 
 /**
+ * Checks if a route is allowed based on a list of rules.
+ * Rules can be inclusions (e.g. "ROUTE1") or exclusions (e.g. "!ROUTE2").
+ * If exclusion rules exist, any route matching an exclusion is disallowed.
+ * If inclusion rules exist, the route must match at least one inclusion.
+ * If no inclusion rules exist (only exclusions or empty), the route is allowed (unless excluded).
+ *
+ * @param trainRoute The route ID of the train
+ * @param rules Array of rule strings
+ * @returns True if allowed, false otherwise
+ */
+function isRouteAllowed(trainRoute: string, rules: string[] | undefined): boolean {
+    if (!rules || rules.length === 0) return true;
+
+    const inclusions = rules.filter(r => !r.startsWith('!'));
+    const exclusions = rules.filter(r => r.startsWith('!')).map(r => r.substring(1));
+
+    // Check exclusions first
+    if (exclusions.some(ex => trainRoute.includes(ex))) {
+        return false;
+    }
+
+    // Check inclusions if they exist
+    if (inclusions.length > 0) {
+        if (!inclusions.some(inc => trainRoute.includes(inc))) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/**
  * Checks if a train is within a specific track block polygon.
  *
  * @param trackBlocks Map of track blocks
@@ -352,7 +393,7 @@ const trainInBlock = (trackBlocks: TrackBlockMap, train: TrainInfo, blockNumber:
     const block = trackBlocks.get(blockNumber);
     if (block) {
         // If block routes are defined, check if the train's route is allowed in this block
-        if (block.routes && !block.routes.some(r => train.route.includes(r))) {
+        if (!isRouteAllowed(train.route, block.routes)) {
             return false;
         } else {
             return isPointInPolygon(train.position.latitude, train.position.longitude, block.polygon);
@@ -526,32 +567,50 @@ function addNewTrain(trackedTrains: TrainInfo[], gtfsTrain: Entity): void {
  */
 function assignBlocksToTrains(trackBlocks: TrackBlockMap, trackedTrains: TrainInfo[], displayThreshold: number, invisibleTrainIds: string[], cityID: string): void {
     const now = Math.ceil(Date.now() / 1000);
-    const displayCutoff = now - displayThreshold;
 
-    // Filter out trains with outdated timestamps or invalid positions
-    const validTrains: TrainInfo[] = [];
     trackedTrains.forEach(train => {
+        // 0. Sanity check coordinates (if invalid, instant stale)
         if (
             train.position.latitude == 0 &&
-            train.position.longitude == 0 ||
-            train.position.timestamp < displayCutoff
+            train.position.longitude == 0
         ) {
             train.currentBlock = undefined;
             train.previousBlock = undefined;
-        } else {
-            validTrains.push(train);
-        }
-    });
-
-    validTrains.forEach(train => {
-        // Skip if train is still in the same block
-        if (train.currentBlock && trainInBlock(trackBlocks, train, train.currentBlock)) {
-            train.previousBlock = train.currentBlock;
             return;
         }
 
-        // Find and set the block the train occupies
-        findAndSetTrainBlock(trackBlocks, train, cityID);
+        // 1. Resolve Block Assignment
+        // Check if train is still in its current block
+        let inCurrentBlock = false;
+        if (train.currentBlock !== undefined) {
+            inCurrentBlock = trainInBlock(trackBlocks, train, train.currentBlock);
+        }
+
+        if (inCurrentBlock) {
+            // Train didn't move blocks.
+            // Update previousBlock to matches current
+            train.previousBlock = train.currentBlock;
+        } else {
+            // Not in current block (or never had one). Search for block.
+            findAndSetTrainBlock(trackBlocks, train, cityID);
+        }
+
+        // 2. Check Staleness using Block Threshold
+        let trainThreshold = displayThreshold;
+        if (train.currentBlock !== undefined) {
+            const block = trackBlocks.get(train.currentBlock);
+            if (block && block.displayThreshold !== undefined) {
+                trainThreshold = block.displayThreshold;
+            }
+        }
+
+        const displayCutoff = now - trainThreshold;
+
+        if (train.position.timestamp < displayCutoff) {
+            // Stale
+            train.currentBlock = undefined;
+            train.previousBlock = undefined;
+        }
     });
 
     updateAltBlocks(trackBlocks, trackedTrains, invisibleTrainIds, cityID);
@@ -583,7 +642,7 @@ function findAndSetTrainBlock(trackBlocks: TrackBlockMap, train: TrainInfo, city
             if (block.platforms) {
                 // 1: Platforms with matching stop_ids
                 for (const platform of block.platforms) {
-                    if (platform.routes && !platform.routes.some(r => train.route.includes(r))) {
+                    if (!isRouteAllowed(train.route, platform.routes)) {
                         continue; // Skip this platform if the train's route is not allowed
                     }
 
@@ -599,7 +658,7 @@ function findAndSetTrainBlock(trackBlocks: TrackBlockMap, train: TrainInfo, city
 
                 // 2: Default platforms with matching bearing
                 for (const platform of block.platforms) {
-                    if (platform.routes && !platform.routes.some(r => train.route.includes(r))) {
+                    if (!isRouteAllowed(train.route, platform.routes)) {
                         continue; // Skip this platform if the train's route is not allowed
                     }
 
@@ -621,7 +680,7 @@ function findAndSetTrainBlock(trackBlocks: TrackBlockMap, train: TrainInfo, city
 
                 // 3: Any default platform for this block
                 for (const platform of block.platforms) {
-                    if (platform.routes && !platform.routes.some(r => train.route.includes(r))) {
+                    if (!isRouteAllowed(train.route, platform.routes)) {
                         continue; // Skip this platform if the train's route is not allowed
                     }
                     if (platform.isDefault && !platform.bearing) {
@@ -693,20 +752,30 @@ function updateAltBlocks(trackBlocks: TrackBlockMap, trackedTrains: TrainInfo[],
  * @param invisibleTrainIds List of train IDs that should be hidden
  * @returns The mutated LEDRailsAPI object with updated LED statuses
  */
-export function generateLedMap(api: LEDRailsAPI, trackedTrains: TrainInfo[], invisibleTrainIds: string[]): LEDRailsAPI {
+export function generateLedMap(api: LEDRailsAPI, trackedTrains: TrainInfo[], invisibleTrainIds: string[], trackBlocks?: TrackBlockMap): LEDRailsAPI {
     // Reset updates for this output
     api.output.updates = [];
 
     // Calculate time thresholds for display and update
     const now = Math.ceil(Date.now() / 1000);
-    const displayCutoff = now - api.displayThreshold;
     const updateTime = now - api.updateInterval;
 
     // Iterate over trains that should be displayed
     trackedTrains
-        .filter(train => train.position.timestamp >= displayCutoff) // Only show trains with recent updates
         .filter(train => !invisibleTrainIds.includes(train.trainId)) // Exclude invisible trains (e.g. paired trains)
         .forEach(train => {
+            let trainThreshold = api.displayThreshold;
+            if (trackBlocks && train.currentBlock !== undefined) {
+                const block = trackBlocks.get(train.currentBlock);
+                if (block && block.displayThreshold !== undefined) {
+                    trainThreshold = block.displayThreshold;
+                }
+            }
+            const displayCutoff = now - trainThreshold;
+
+            if (train.position.timestamp < displayCutoff) {
+                return; // Skip expired trains
+            }
             // Only update if both current and previous block are known
             if (train.currentBlock !== undefined && train.previousBlock !== undefined) {
                 const colorId = api.routeToColorId[train.route]; // Get color for this route

@@ -13,8 +13,6 @@
         "trackblock",
         "trackedtrains"
     ],
-    // The path to the `bun` executable.
-    "bun.runtime": "node_modules/bun/bin/bun",
     // If support for Bun should be added to the default "JavaScript Debug Terminal".
     "bun.debugTerminal.enabled": true,
     // If the debugger should stop on the first line of the program.
