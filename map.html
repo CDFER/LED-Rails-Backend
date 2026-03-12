@@ -319,7 +319,7 @@
             const stopIds = entity.tripUpdate?.stopTimeUpdate?.map(stu => stu.stopId) || [];
             const stops = stopsMap ? stopIds.map(id => stopsMap[id]) : [];
             return `
-                ${vehicleInfo?.label ? `<b>Label:</b> ${toUpperCase(vehicleInfo.label)}<br>` : ''}
+                ${vehicleInfo?.label ? `<b>Label:</b> ${vehicleInfo.label.toUpperCase()}<br>` : ''}
                 ${vehicleId ? `<b>Vehicle ID:</b> ${vehicleId}<br>` : ''}
                 ${trip?.route_id ? `<b>Route:</b> ${trip.route_id + (direction || '')}<br>` : ''}
                 ${trip?.routeId ? `<b>Route:</b> ${trip.routeId}<br>` : ''}

@@ -12,7 +12,6 @@ export interface LEDRailsAPI {
         end: number;  // End block number for remapping (inclusive)
         offset: number; // Offset to apply for remapping e.g. 302 with offset -1 becomes 301
     }> | undefined; // Optional remapping of block numbers for this board revision
-    displayThreshold: number; // Time in seconds to display trains after their last update
     randomizeTimeOffset: boolean; // Whether to randomize time offsets for LED updates
     updateInterval: number; // Interval in seconds between updates
     output: LEDRailsAPIOutput; // The prepared output to send to the LED Rails API
@@ -58,6 +57,7 @@ export interface TrainInfo {
     position: { latitude: number; longitude: number; timestamp: number; speed: number | undefined, bearing: number | undefined }; // GTFS Position update of the train
     currentBlock: number | undefined; // Track block number (e.g., 301)
     previousBlock: number | undefined; // Previous block number (e.g., 300)
+    currentBlockDisplayThreshold: number | undefined; // Display threshold of the current block (can be inherited from platform or parent block)
     route: string; // Route ID from GTFS e.g. "EAST-201"
     tripId: string | undefined; // Trip ID from GTFS
     stops: { stopId: string; departureTime: number }[] | undefined;     // Array of upcoming stop IDs and departure times for this train
@@ -473,9 +473,12 @@ function addNewStopsFromTripUpdate(stops: { stopId: string; departureTime: numbe
             }
         }
 
-        // Remove stops with a departure time that are more than 10 mins in the past while keeping those with unknown departure times (0)
+        // Remove stops with a departure time that are more than 20 mins in the past while keeping those with unknown departure times (0)
         const now = Math.ceil(Date.now() / 1000);
-        stops = stops.filter(s => s.departureTime == 0 || s.departureTime >= now - 60 * 10);
+        stops = stops.filter(s => s.departureTime == 0 || s.departureTime >= now - 60 * 20);
+
+        // Sort stops by departure time (from oldest to furthest in the future)
+        stops.sort((a, b) => a.departureTime - b.departureTime);
     }
 
     return stops.length > 0 ? stops : undefined;
@@ -490,9 +493,9 @@ function addNewStopsFromTripUpdate(stops: { stopId: string; departureTime: numbe
 function updateExistingTrainPosition(trackedTrain: TrainInfo, gtfsTrain: Entity): void {
     const newPosition = gtfsTrain.vehicle?.position;
 
-    if (newPosition?.latitude != trackedTrain.position.latitude ||
-        newPosition?.longitude != trackedTrain.position.longitude) {
-        // Position has changed
+    if ((newPosition?.latitude != trackedTrain.position.latitude ||
+        newPosition?.longitude != trackedTrain.position.longitude) && gtfsTrain.vehicle?.timestamp && trackedTrain.position.timestamp < gtfsTrain.vehicle?.timestamp) {
+        // Position has changed and timestamp is newer
 
         let newSpeed = newPosition?.speed;
 
@@ -515,7 +518,7 @@ function updateExistingTrainPosition(trackedTrain: TrainInfo, gtfsTrain: Entity)
             trackedTrain.position.longitude = newPosition?.longitude ?? 0;
         }
 
-        if (newSpeed > 4 && newSpeed < 55) { // 4 m/s = ~15 km/h and 55 m/s = ~198 km/h
+        if (newSpeed > 2 && newSpeed < 55) { // 2 m/s = ~7 km/h and 55 m/s = ~198 km/h
             // Only update bearing if speed is reasonable (to avoid erratic bearing changes when stationary)
             trackedTrain.position.bearing = newPosition?.bearing;
         }
@@ -552,6 +555,7 @@ function addNewTrain(trackedTrains: TrainInfo[], gtfsTrain: Entity): void {
         route: String(vehicle?.trip?.route_id ?? vehicle?.trip?.routeId ?? 'OUT-OF-SERVICE'),
         currentBlock: undefined,
         previousBlock: undefined,
+        currentBlockDisplayThreshold: undefined,
         tripId: vehicle?.trip?.trip_id,
         stops: addNewStopsFromTripUpdate([], gtfsTrain.tripUpdate?.stopTimeUpdate),
     });
@@ -596,20 +600,14 @@ function assignBlocksToTrains(trackBlocks: TrackBlockMap, trackedTrains: TrainIn
         }
 
         // 2. Check Staleness using Block Threshold
-        let trainThreshold = displayThreshold;
-        if (train.currentBlock !== undefined) {
-            const block = trackBlocks.get(train.currentBlock);
-            if (block && block.displayThreshold !== undefined) {
-                trainThreshold = block.displayThreshold;
-            }
-        }
-
-        const displayCutoff = now - trainThreshold;
-
-        if (train.position.timestamp < displayCutoff) {
-            // Stale
+        if (now - train.position.timestamp > (train.currentBlockDisplayThreshold ?? displayThreshold)) {
             train.currentBlock = undefined;
             train.previousBlock = undefined;
+            train.currentBlockDisplayThreshold = undefined;
+        }
+
+        if (train.position.timestamp > now - displayThreshold && train.position.timestamp < now - train.currentBlockDisplayThreshold!) {
+            console.log(`Thershold = ${train.currentBlockDisplayThreshold} for train ${train.trainId} in block ${train.currentBlock}`);
         }
     });
 
@@ -651,6 +649,7 @@ function findAndSetTrainBlock(trackBlocks: TrackBlockMap, train: TrainInfo, city
                         const stopsIntersection = platform.stop_ids.filter(stopId => train.stops!.some(s => s.stopId === stopId));
                         if (stopsIntersection.length > 0) {
                             setTrainBlock(train, platform.blockNumber);
+                            train.currentBlockDisplayThreshold = block.displayThreshold;
                             return;
                         }
                     }
@@ -671,6 +670,7 @@ function findAndSetTrainBlock(trackBlocks: TrackBlockMap, train: TrainInfo, city
                                 const normalizedBearingDiff = bearingDiff > 180 ? 360 - bearingDiff : bearingDiff;
                                 if (normalizedBearingDiff <= 90) {
                                     setTrainBlock(train, platform.blockNumber);
+                                    train.currentBlockDisplayThreshold = block.displayThreshold;
                                     return;
                                 }
                             }
@@ -685,12 +685,14 @@ function findAndSetTrainBlock(trackBlocks: TrackBlockMap, train: TrainInfo, city
                     }
                     if (platform.isDefault && !platform.bearing) {
                         setTrainBlock(train, platform.blockNumber);
+                        train.currentBlockDisplayThreshold = block.displayThreshold;
                         return;
                     }
                 }
 
             } else {
                 setTrainBlock(train, block.blockNumber);
+                train.currentBlockDisplayThreshold = block.displayThreshold;
                 return;
             }
         }
@@ -699,6 +701,7 @@ function findAndSetTrainBlock(trackBlocks: TrackBlockMap, train: TrainInfo, city
     // Train is not in any known block
     train.currentBlock = undefined;
     train.previousBlock = undefined;
+    train.currentBlockDisplayThreshold = undefined;
 }
 
 /**
@@ -764,18 +767,6 @@ export function generateLedMap(api: LEDRailsAPI, trackedTrains: TrainInfo[], inv
     trackedTrains
         .filter(train => !invisibleTrainIds.includes(train.trainId)) // Exclude invisible trains (e.g. paired trains)
         .forEach(train => {
-            let trainThreshold = api.displayThreshold;
-            if (trackBlocks && train.currentBlock !== undefined) {
-                const block = trackBlocks.get(train.currentBlock);
-                if (block && block.displayThreshold !== undefined) {
-                    trainThreshold = block.displayThreshold;
-                }
-            }
-            const displayCutoff = now - trainThreshold;
-
-            if (train.position.timestamp < displayCutoff) {
-                return; // Skip expired trains
-            }
             // Only update if both current and previous block are known
             if (train.currentBlock !== undefined && train.previousBlock !== undefined) {
                 const colorId = api.routeToColorId[train.route]; // Get color for this route

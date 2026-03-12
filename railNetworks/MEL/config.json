@@ -15,6 +15,7 @@
     "displayThreshold": 300,
     "removeStaleVehiclesHours": 168,
     "cacheGTFS": true,
+    "cacheTrackedTrains": true,
     "cacheIntervalSeconds": 360
   },
   "trainFilter": {
