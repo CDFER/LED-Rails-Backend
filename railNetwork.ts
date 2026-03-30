@@ -28,8 +28,8 @@ interface RailNetworkConfig {
     GTFSRealtimeAPI: {
         url: Array<string>; // Endpoint for GTFS Realtime positions feed
         tripsUrl: Array<string> | undefined; // Endpoint for GTFS Realtime trips feed
-        keyHeader: string; // HTTP header name for API key
-        key: string | undefined; // API key (should be loaded from .env, not config.json)
+        keyHeader?: string; // HTTP header name for API key
+        key?: string; // API key (should be loaded from .env, not config.json)
         fetchIntervalSeconds: number; // How often to fetch updates
         format: string; // Structure of the response (e.g. "FeedMessage" or "GTFSRealtime")
         protocol: string; // Protocol of the response (e.g. "protobuf" or )
@@ -189,12 +189,16 @@ export class RailNetwork {
     async fetchFromAPI(network: this, URL: string): Promise<FeedMessage | GTFSRealtime | undefined> {
         let response: Response;
         try {
+            const headers = new Headers({
+                'Accept': network.config.GTFSRealtimeAPI.protocol === 'protobuf' ? 'application/x-protobuf' : 'application/json,application',
+                'Accept-Encoding': 'gzip, deflate, br',
+            });
+            if (network.config.GTFSRealtimeAPI.keyHeader) {
+                headers.append(network.config.GTFSRealtimeAPI.keyHeader, network.config.GTFSRealtimeAPI.key ?? '');
+            }
+
             response = await fetch(URL, {
-                headers: new Headers({
-                    [network.config.GTFSRealtimeAPI.keyHeader]: network.config.GTFSRealtimeAPI.key ?? '',
-                    'Accept': network.config.GTFSRealtimeAPI.protocol === 'protobuf' ? 'application/x-protobuf' : 'application/json,application',
-                    'Accept-Encoding': 'gzip, deflate, br',
-                }),
+                headers: headers,
                 redirect: 'follow',
             });
         } catch (error) {

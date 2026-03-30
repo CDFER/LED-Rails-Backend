@@ -39,9 +39,12 @@ async function initializeServer() {
 
     for (const network of railNetworks) {
         // Set the API key from .env file (AKL=xxxx, WLG=yyyy, etc)
-        network.config.GTFSRealtimeAPI.key = process.env[network.id];
+        const envKey = process.env[network.id];
+        if (envKey !== undefined) {
+            network.config.GTFSRealtimeAPI.key = envKey;
+        }
 
-        if (!network.config.GTFSRealtimeAPI.key) {
+        if (network.config.GTFSRealtimeAPI.keyHeader && !network.config.GTFSRealtimeAPI.key) {
             log(network.id, 'API Key Missing from .env file, skipping setup.');
             // throw new Error(`${network.id} API key not found in .env file`);
         } else {

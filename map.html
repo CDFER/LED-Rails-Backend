@@ -124,6 +124,12 @@
             opacity: 0.6;
             color: #666;
         }
+
+        .leaflet-popup-content {
+            width: auto !important;
+            max-width: 800px !important;
+            white-space: nowrap;
+        }
     </style>
 </head>
 
@@ -198,6 +204,7 @@
         const activeIcon = L.divIcon({ className: 'vehicle-marker' });
         const staleIcon = L.divIcon({ className: 'vehicle-marker stale' });
         let vehicleMarkers = new Map();
+        let expandedVehicles = new Set();
 
         // --- Route color mapping ---
         const ROUTE_COLORS = {
@@ -243,7 +250,94 @@
             'aus:vic:vic-01-SNH:': '#8F1A95',
             'aus:vic:vic-01-SWL:': '#8F1A95',
             'aus:vic:vic-01-TRN:': '#8F1A95',
-            'aus:vic:vic-01-WBL:': '#8F1A95'
+            'aus:vic:vic-01-WBL:': '#8F1A95',
+
+            // Sydney (These must be matched through the trip_id because the route_id is not consistent)
+            '2-T1-N-sj2-1': '#F99D1C',  // T1 North Shore and Western Line
+            '2-T1-W-sj2-1': '#F99D1C',  // T1 North Shore and Western Line
+            '2-T2-sj2-1': '#0098CD',    // T2 Leppington and Inner West Line
+            '2-T3-sj2-1': '#F37021',    // T3 Liverpool and Inner West Line
+            '2-T4-sj2-1': '#005AA3',    // T4 Eastern Suburbs and Illawarra Line
+            '2-T5-sj2-1': '#C4258F',    // T5 Cumberland Line
+            '2-T6-sj2-1': '#F6891F',    // T6 Lidcombe and Bankstown Line
+            '2-T7-sj2-1': '#6F818E',    // T7 Olympic Park Line
+            '2-T8-sj2-1': '#00954C',    // T8 Airport and South Line
+            '2-T9-sj2-1': '#D11F2F',    // T9 Northern Line
+
+            // Brisbane (Routes use partial matching on route_id, e.g. "BRRP-4731" matches as "BRRP")
+            'BDCA': '#00447C',  // Airport - Caboolture
+            'CLCL': '#00447C',  // Cleveland - Cleveland
+            'DBCA': '#00447C',  // Doomben - Caboolture
+            'SHCA': '#00447C',  // Shorncliffe - Caboolture
+            'VLBN': '#00447C',  // Varsity Lakes - Beenleigh
+            'BNCL': '#00467F',  // Beenleigh - Cleveland
+            'BNSH': '#00467F',  // Beenleigh - Shorncliffe
+            'BRCL': '#00467F',  // Brisbane City - Cleveland
+            'BRSH': '#00467F',  // Brisbane City - Shorncliffe
+            'CLBR': '#00467F',  // Cleveland - Brisbane City
+            'CLSH': '#00467F',  // Cleveland - Shorncliffe
+            'DBCL': '#00467F',  // Doomben - Cleveland
+            'SHBN': '#00467F',  // Shorncliffe - Beenleigh
+            'SHBR': '#00467F',  // Shorncliffe - Brisbane City
+            'SHCL': '#00467F',  // Shorncliffe - Cleveland
+            'BRCA': '#008752',  // Brisbane City - Caboolture
+            'BRGY': '#008752',  // Brisbane City - Gympie North
+            'BRIP': '#008752',  // Brisbane City - Ipswich
+            'BRNA': '#008752',  // Brisbane City - Nambour
+            'BRRW': '#008752',  // Brisbane City - Rosewood
+            'CABR': '#008752',  // Caboolture - Brisbane City
+            'CACA': '#008752',  // Caboolture - Caboolture
+            'CADB': '#008752',  // Caboolture - Doomben
+            'CAIP': '#008752',  // Caboolture - Ipswich
+            'CARW': '#008752',  // Caboolture - Rosewood
+            'CASH': '#008752',  // Caboolture - Shorncliffe
+            'GYBR': '#008752',  // Gympie North - Brisbane City
+            'IPBR': '#008752',  // Ipswich - Brisbane City
+            'IPCA': '#008752',  // Ipswich - Caboolture
+            'IPIP': '#008752',  // Ipswich - Ipswich
+            'IPNA': '#008752',  // Ipswich - Nambour
+            'IPRW': '#008752',  // Ipswich - Rosewood
+            'NABR': '#008752',  // Nambour - Brisbane City
+            'NAIP': '#008752',  // Nambour - Ipswich
+            'NANA': '#008752',  // Nambour - Nambour
+            'RPIP': '#008752',  // Redcliffe Peninsula - Ipswich
+            'RWBR': '#008752',  // Rosewood - Brisbane City
+            'RWCA': '#008752',  // Rosewood - Caboolture
+            'RWIP': '#008752',  // Rosewood - Ipswich
+            'RWNA': '#008752',  // Rosewood - Nambour
+            'SPCA': '#008752',  // Springfield - Caboolture
+            'SPNA': '#008752',  // Springfield - Nambour
+            'BRRP': '#1578BE',  // Brisbane City - Redcliffe Peninsula
+            'BRSP': '#1578BE',  // Brisbane City - Springfield
+            'CASP': '#1578BE',  // Caboolture - Springfield
+            'IPRP': '#1578BE',  // Ipswich - Redcliffe Peninsula
+            'NASP': '#1578BE',  // Nambour - Springfield
+            'RPBR': '#1578BE',  // Redcliffe Peninsula - Brisbane City
+            'RPSP': '#1578BE',  // Redcliffe Peninsula - Springfield
+            'RWRP': '#1578BE',  // Rosewood - Redcliffe Peninsula
+            'SPBR': '#1578BE',  // Springfield - Brisbane City
+            'SPRP': '#1578BE',  // Springfield - Redcliffe Peninsula
+            'BRBR': '#A0A0A0',  // Brisbane City - Brisbane City
+            'BRDB': '#A54399',  // Brisbane City - Doomben
+            'CLDB': '#A54399',  // Cleveland - Doomben
+            'DBBR': '#A54399',  // Doomben - Brisbane City
+            'VLDB': '#A54399',  // Varsity Lakes - Doomben
+            'BNBN': '#E31837',  // Beenleigh - Beenleigh
+            'BNBR': '#E31837',  // Beenleigh - Brisbane City
+            'BNFG': '#E31837',  // Beenleigh - Ferny Grove
+            'BRBN': '#E31837',  // Brisbane City - Beenleigh
+            'BRFG': '#E31837',  // Brisbane City - Ferny Grove
+            'DBBN': '#E31837',  // Doomben - Beenleigh
+            'FGBN': '#E31837',  // Ferny Grove - Beenleigh
+            'FGBR': '#E31837',  // Ferny Grove - Brisbane City
+            'BDBR': '#FFC425',  // Airport - Brisbane City
+            'BDVL': '#FFC425',  // Airport - Varsity Lakes
+            'BNVL': '#FFC425',  // Beenleigh - Varsity Lakes
+            'BRBD': '#FFC425',  // Brisbane City - Airport
+            'BRVL': '#FFC425',  // Brisbane City - Varsity Lakes
+            'VLBD': '#FFC425',  // Varsity Lakes - Airport
+            'VLBR': '#FFC425',  // Varsity Lakes - Brisbane City
+            'GCR1': '#FFD200',  // Gold Coast Light Rail (G:Link)
         };
         const DEFAULT_ARROW_COLOR = '#ff00ff';
         let vehicleLabels = new Map(); // Map label (lowercase) to vehicleId
@@ -303,9 +397,20 @@
         });
 
         function createArrowIcon(bearing, isStale, color) {
-            // bearing: degrees, 0 = north
-            const rotation = bearing ? `rotate(${bearing}deg)` : '';
             const arrowColor = isStale ? '#808080' : (color || DEFAULT_ARROW_COLOR);
+
+            // If no bearing is provided, show a circle instead of an arrow
+            if (bearing === undefined || bearing === null) {
+                return L.divIcon({
+                    className: '',
+                    iconSize: [14, 14],
+                    iconAnchor: [7, 7],
+                    html: `<div style="width: 100%; height: 100%; background-color: ${arrowColor}; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.8); box-sizing: border-box;"></div>`
+                });
+            }
+
+            // bearing: degrees, 0 = north
+            const rotation = `rotate(${bearing}deg)`;
             return L.divIcon({
                 className: `vehicle-arrow${isStale ? ' stale' : ''}`,
                 iconSize: [18, 18],
@@ -325,8 +430,7 @@
                 ${trip?.routeId ? `<b>Route:</b> ${trip.routeId}<br>` : ''}
                 ${trip?.trip_id ? `<b>Trip:</b> ${trip.trip_id}<br>` : ''}
                 ${trip?.tripId ? `<b>Trip:</b> ${trip.tripId}<br>` : ''}
-                ${latitude !== undefined ? `<b>Lat:</b> ${latitude.toFixed(5)}<br>` : ''}
-                ${longitude !== undefined ? `<b>Lon:</b> ${longitude.toFixed(5)}<br>` : ''}
+                ${latitude !== undefined ? `<b>Lat:</b> ${latitude.toFixed(5)}` : ''}, ${longitude !== undefined ? `<b>Long:</b> ${longitude.toFixed(5)}<br>` : ''}
                 ${position?.bearing !== undefined ? `<b>Bearing:</b> ${Number(position.bearing).toFixed(0)}°<br>` : ''}
                 ${position?.speed !== undefined ? `<b>Speed:</b> ${(position.speed * 3.6).toFixed(0)}km/h<br>` : ''}
                 ${position?.odometer !== undefined ? `<b>Odometer:</b> ${Number((position.odometer / 1000).toFixed(0)).toLocaleString('en-NZ')} km<br>` : ''}
@@ -335,8 +439,9 @@
                     if (stopIds.length === 0) return '';
                     const stopList = stops.map((s, i) => {
                         if (!s) return `(${stopIds[i]})<br>`;
-                        const stopName = s.stop_name.replace(/ Station$/, '');
-                        const platform = s.platform_code ? s.platform_code : '';
+                        const stopName = s.stop_name.replace(/station|platform/gi, '').replace(/,/g, '').replace(/\s+/g, ' ').trim();
+                        // If stopName ends with a number, do not append platform_code
+                        const platform = (s.platform_code && !/\d+$/.test(stopName)) ? ' ' + s.platform_code : '';
                         const arrivalTs = entity.tripUpdate?.stopTimeUpdate?.[i]?.arrival?.time;
                         const departureTs = entity.tripUpdate?.stopTimeUpdate?.[i]?.departure?.time;
 
@@ -355,9 +460,54 @@
                         //if (!platform) {
                         //    console.warn(`No platform code given for: ${s.stop_name} (${vehicleId})`);
                         //}
-                        return `<i>- ${stopName} ${platform} (${stopIds[i]}) ${timeString}</i><br>`;
-                    }).join('');
-                    return `<b>Stops:</b><br>${stopList}`;
+                        return `<i>- ${stopName}${platform} (${stopIds[i]}) ${timeString}</i><br>`;
+                    });
+
+                    const DEFAULT_MAX_STOPS = 5;
+                    const now = Math.floor(Date.now() / 1000);
+                    let firstUpcomingIndex = stopIds.length;
+
+                    for (let i = 0; i < stopIds.length; i++) {
+                        const arrivalTs = entity.tripUpdate?.stopTimeUpdate?.[i]?.arrival?.time;
+                        const departureTs = entity.tripUpdate?.stopTimeUpdate?.[i]?.departure?.time;
+                        const ts = departureTs || arrivalTs;
+                        // use a 60 second buffer for past stops
+                        if (ts && ts >= now - 60) {
+                            firstUpcomingIndex = i;
+                            break;
+                        }
+                    }
+                    // If no upcoming stops are found, default to showing the very last stops
+                    if (firstUpcomingIndex === stopIds.length) {
+                        firstUpcomingIndex = Math.max(0, stopList.length - DEFAULT_MAX_STOPS);
+                    }
+
+                    if (stopList.length <= DEFAULT_MAX_STOPS) {
+                        return `<b>Stops:</b><br>${stopList.join('')}`;
+                    } else {
+                        const endIndex = firstUpcomingIndex + DEFAULT_MAX_STOPS;
+                        const visibleStops = stopList.slice(firstUpcomingIndex, endIndex).join('');
+                        const hiddenStopsBefore = stopList.slice(0, firstUpcomingIndex).join('');
+                        const hiddenStopsAfter = stopList.slice(endIndex).join('');
+
+                        const hiddenCount = stopList.length - stopList.slice(firstUpcomingIndex, endIndex).length;
+
+                        if (hiddenCount === 0) {
+                            return `<b>Stops:</b><br>${stopList.join('')}`;
+                        }
+
+                        const isExpanded = expandedVehicles.has(vehicleId);
+                        const displayStyle = isExpanded ? 'block' : 'none';
+                        const buttonText = isExpanded ? 'Show less' : `Show ${hiddenCount} hidden stops`;
+
+                        return `<b>Stops:</b><br>
+                            <div class="stops-list-container">
+                                <div style="display: ${displayStyle};" class="hidden-stops">${hiddenStopsBefore}</div>
+                                <div>${visibleStops}</div>
+                                <div style="display: ${displayStyle};" class="hidden-stops">${hiddenStopsAfter}</div>
+                                <button data-vehicle-id="${vehicleId}" onclick="const hiddenDivs = this.parentElement.querySelectorAll('.hidden-stops'); const isHidden = hiddenDivs[0].style.display === 'none'; hiddenDivs.forEach(d => d.style.display = isHidden ? 'block' : 'none'); this.innerText = isHidden ? 'Show less' : 'Show ${hiddenCount} hidden stops'; if (isHidden) { expandedVehicles.add(this.dataset.vehicleId); } else { expandedVehicles.delete(this.dataset.vehicleId); }" style="margin-top: 4px; font-size: 0.9em; padding: 2px 6px; cursor: pointer;">${buttonText}</button>
+                            </div>`;
+                    }
                 })()}
             `;
         }
@@ -382,9 +532,17 @@
                     const ageInMs = vehicleData.timestamp ? Date.now() - (vehicleData.timestamp * 1000) : Infinity;
                     const isStale = ageInMs > STALE_TIMEOUT_MS;
                     const trip = vehicleData?.trip;
-                    const routeId = trip?.route_id || trip?.routeId;
+                    const routeId = trip?.route_id || trip?.routeId || '';
                     const direction = `-${trip?.direction_id} `;
-                    const arrowColor = ROUTE_COLORS[routeId] || DEFAULT_ARROW_COLOR;
+
+                    // Determine arrow color based on route ID, with partial matching fallback
+                    let arrowColor = ROUTE_COLORS[routeId];
+                    if (!arrowColor) {
+                        const bestMatch = Object.keys(ROUTE_COLORS)
+                            .filter(key => routeId.includes(key))
+                            .sort((a, b) => b.length - a.length)[0];
+                        arrowColor = bestMatch ? ROUTE_COLORS[bestMatch] : DEFAULT_ARROW_COLOR;
+                    }
 
                     if (arrowColor === DEFAULT_ARROW_COLOR) {
                         console.warn(`No route color defined for route ID: ${routeId}`);

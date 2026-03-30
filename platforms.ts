@@ -23,7 +23,7 @@ export default function loadStopsMap(stopsFilePath: string): Record<string, { st
         const line = lines[i];
         if (!line) continue;
 
-        const values = line.split(',').map(v => v.trim().replace(/"/g, ''));
+        const values = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(v => v.trim().replace(/^"|"$/g, '').replace(/""/g, '"'));
         const stopIdValue = values[stopIdIndex];
         const stopName = values[stopNameIndex];
         const platformId = values[platformCodeIndex];

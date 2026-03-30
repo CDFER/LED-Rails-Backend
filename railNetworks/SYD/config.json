@@ -1,0 +1,25 @@
+{
+  "GTFSRealtimeAPI": {
+    "url": [
+      "https://api.transport.nsw.gov.au/v2/gtfs/vehiclepos/sydneytrains"
+    ],
+    "tripsUrl": [
+      "https://api.transport.nsw.gov.au/v2/gtfs/realtime/sydneytrains"
+    ],
+    "keyHeader": "Authorization",
+    "fetchIntervalSeconds": 15,
+    "format": "GTFSRealtime",
+    "protocol": "protobuf"
+  },
+  "stops": {
+    "fileName": "stops.txt"
+  },
+  "processingOptions": {
+    "pairTrains": false,
+    "displayThreshold": 300,
+    "removeStaleVehiclesHours": 1,
+    "cacheGTFS": true,
+    "cacheTrackedTrains": true,
+    "cacheIntervalSeconds": 360
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "GTFSRealtimeAPI": {
+    "url": [
+      "https://gtfsrt.api.translink.com.au/api/realtime/SEQ/VehiclePositions/Rail",
+      "https://gtfsrt.api.translink.com.au/api/realtime/SEQ/VehiclePositions/Tram"
+    ],
+    "tripsUrl": [
+      "https://gtfsrt.api.translink.com.au/api/realtime/SEQ/TripUpdates/Rail",
+      "https://gtfsrt.api.translink.com.au/api/realtime/SEQ/TripUpdates/Tram"
+    ],
+    "fetchIntervalSeconds": 15,
+    "format": "GTFSRealtime",
+    "protocol": "protobuf"
+  },
+  "stops": {
+    "fileName": "stops.txt"
+  },
+  "processingOptions": {
+    "pairTrains": false,
+    "displayThreshold": 300,
+    "removeStaleVehiclesHours": 1,
+    "cacheGTFS": true,
+    "cacheTrackedTrains": true,
+    "cacheIntervalSeconds": 360
+  }
+}
