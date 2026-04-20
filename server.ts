@@ -1,9 +1,9 @@
+import 'bun';
 import { config as loadEnv } from 'dotenv';
 import { promises as fs } from 'fs';
 import path from 'path';
 
 import { LOG_LABELS, log } from './customUtils';
-
 import { RailNetwork } from './railNetwork';
 
 const PORT = 3000;
@@ -20,11 +20,10 @@ async function initializeServer() {
         if (method === 'GET') routes.set(url, handler);
     };
 
-    log(LOG_LABELS.SYSTEM, 'Starting', {
+    log(LOG_LABELS.SERVER, 'Starting', {
         env: process.env.NODE_ENV || 'development',
         bunVersion: Bun.version,
-        platform: `${process.platform}/${process.arch}`,
-        mem: (process.memoryUsage().rss / (1024 ** 2)).toFixed(0) + "MiB",
+        platform: `${process.platform}/${process.arch}`
     });
 
     // Dynamically load all rail networks from the railNetworks directory
@@ -79,7 +78,7 @@ async function initializeServer() {
                 addRoute('GET', `${prefix}/api/trackedtrains`, () => Response.json(network.trackedTrains));
 
                 // stopsMap (To make it easier to map stop IDs to names/platforms)
-                if (network.stopsMap){
+                if (network.stopsMap) {
                     addRoute('GET', `${prefix}/api/stops`, () => Response.json(network.stopsMap));
                 }
 
@@ -192,6 +191,7 @@ async function initializeServer() {
     log(LOG_LABELS.SERVER, 'Started', {
         port: PORT,
         startup: (process.uptime() * 1000).toFixed(0) + 'ms',
+        mem: (process.memoryUsage().rss / (1024 ** 2)).toFixed(0) + "MiB",
     });
 }
 

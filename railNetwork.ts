@@ -20,6 +20,7 @@ import loadStopsMap from './platforms';
 import { saveToCache, readFromCache } from './cache';
 import { TrainPair, checkForTrainPairs } from './trainPairs';
 import { log } from './customUtils';
+import { downloadStaticGTFS, generateTimetable } from './staticGTFS';
 
 /**
  * Configuration for a rail network, loaded from config.json
@@ -29,10 +30,16 @@ interface RailNetworkConfig {
         url: Array<string>; // Endpoint for GTFS Realtime positions feed
         tripsUrl: Array<string> | undefined; // Endpoint for GTFS Realtime trips feed
         keyHeader: string; // HTTP header name for API key
-        key: string | undefined; // API key (should be loaded from .env, not config.json)
+        key: string | undefined; // API key (loaded from .env, not config.json)
         fetchIntervalSeconds: number; // How often to fetch updates
         format: string; // Structure of the response (e.g. "FeedMessage" or "GTFSRealtime")
         protocol: string; // Protocol of the response (e.g. "protobuf" or )
+    };
+    GTFSStaticAPI?: {
+        url: string; // Endpoint for GTFS Static zip release
+        keyHeader?: string; // HTTP header name for API key
+        key?: string; // API key (loaded from .env, not config.json)
+        fetchIntervalDays: number; // How often to fetch updates
     };
     trainFilter: {
         entityID?: {
@@ -76,9 +83,13 @@ interface RailNetworkConfig {
 
 export class RailNetwork {
     id: string;
+    configFolderPath: string;
     config: RailNetworkConfig;
     trackBlocks: TrackBlockMap | undefined;
+    trackBlockBoundingBox: { minLat: number; maxLat: number; minLon: number; maxLon: number } | undefined;
+    maxDisplayThreshold: number | undefined; // The maximum display threshold across all trackBlocks, used for more efficent train tracking
     stopsMap: Record<string, { stop_name: string; platform_code: string | undefined }> | undefined;
+    
     entities: Entity[] = [];
     ledRailsAPIs: LEDRailsAPI[] = [];
 
@@ -97,17 +108,13 @@ export class RailNetwork {
     constructor(configFolderPath: string) {
         // Set the id of the rail network based on the name of the config folder
         this.id = path.basename(configFolderPath);
+        this.configFolderPath = configFolderPath;
 
         // Synchronously read and parse the config JSON file (you can't use async in a constructor)
         const configFilePath = path.resolve(configFolderPath, 'config.json');
         this.config = JSON.parse(fs.readFileSync(configFilePath, 'utf-8'));
 
-        if (this.config.trackBlocks && this.config.trackBlocks.fileName) {
-            const trackBlocksPath = path.resolve(configFolderPath, this.config.trackBlocks.fileName);
-            this.trackBlocks = loadTrackBlocks(this.id, trackBlocksPath);
-        } else {
-            this.trackBlocks = undefined;
-        }
+        loadTrackBlocks(this);
         // Configuration for a rail network, loaded from config.json
 
         if (this.config.processingOptions.pairTrains) {
@@ -171,6 +178,27 @@ export class RailNetwork {
         if (this.config.processingOptions.removeStaleVehiclesHours) {
             this.removeStaleVehicles(); // Initial cleanup on startup
             setInterval(() => { this.removeStaleVehicles(); }, this.config.processingOptions.removeStaleVehiclesHours * 3600 * 1000);
+        }
+
+        // if (this.config.GTFSStaticAPI && this.config.GTFSStaticAPI.fetchIntervalDays) {
+        //     this.updateStaticGTFS(); // Initial check on startup
+        //     setInterval(() => { this.updateStaticGTFS(); }, this.config.GTFSStaticAPI.fetchIntervalDays * 24 * 3600 * 1000);
+        // }
+    }
+
+    /**
+     * Downloads the static GTFS file if configured.
+     */
+    async updateStaticGTFS() {
+        if (!this.config.GTFSStaticAPI) return;
+        if (await downloadStaticGTFS(
+            this.id,
+            this.config.GTFSStaticAPI.url,
+            this.config.GTFSStaticAPI.fetchIntervalDays,
+            this.config.GTFSStaticAPI.keyHeader,
+            this.config.GTFSStaticAPI.key
+        )) {
+            // generateTimetable(this);
         }
     }
 
@@ -355,7 +383,7 @@ export class RailNetwork {
             this.invisibleTrains = [];
         }
 
-        this.trackedTrains = updateTrackedTrains(this.trackBlocks, this.trackedTrains, this.trainEntities, this.config.processingOptions.displayThreshold, this.invisibleTrains, this.id);
+        this.trackedTrains = updateTrackedTrains(this, this.trackedTrains, this.trainEntities, this.invisibleTrains);
         // console.timeEnd(`[${this.id}] Fetched GTFS data...`);
     }
 

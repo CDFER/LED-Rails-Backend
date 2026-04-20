@@ -1,8 +1,10 @@
 import * as fs from 'fs';
+import * as path from 'path';
 import { DOMParser } from '@xmldom/xmldom';
 import type { Entity, StopTimeUpdate } from 'gtfs-types';
 import { LOG_LABELS, log } from './customUtils';
 import { calculateDistance } from './trainPairs';
+import type { RailNetwork } from './railNetwork';
 
 export interface LEDRailsAPI {
     routeToColorId: Record<string, number>; // Map of route names to color IDs
@@ -66,14 +68,28 @@ export interface TrainInfo {
 /**
  * Loads track blocks from a KML file and parses them into a TrackBlockMap.
  *
- * @param cityID City identifier (e.g., 'AKL', 'WLG')
- * @param filePath Path to the KML file
- * @returns Map of block numbers to TrackBlock objects
+ * @param railNetwork Rail network configuration and state
  */
-export function loadTrackBlocks(cityID: string, filePath: string) {
+export function loadTrackBlocks(railNetwork: RailNetwork): void {
+    const cityID = railNetwork.id;
+    const defaultDisplayThreshold = railNetwork.config.processingOptions.displayThreshold ?? 300;
+    const filePath = railNetwork.config.trackBlocks?.fileName
+        ? path.resolve(railNetwork.configFolderPath, railNetwork.config.trackBlocks.fileName)
+        : undefined;
+
+    if (!filePath) {
+        railNetwork.trackBlocks = undefined;
+        railNetwork.maxDisplayThreshold = defaultDisplayThreshold;
+        return;
+    }
+
     const kmlContent = fs.readFileSync(filePath, 'utf-8');
     const doc = new DOMParser().parseFromString(kmlContent, 'text/xml');
     const loadedBlocks: TrackBlock[] = [];
+
+    let maxDisplayThreshold: number = defaultDisplayThreshold;
+    let trackBlockBoundingBox: { minLat: number; maxLat: number; minLon: number; maxLon: number } | undefined = undefined;
+
 
     for (const folder of Array.from(doc.getElementsByTagName('Folder'))) {
         for (const placemark of Array.from(folder.getElementsByTagName('Placemark'))) {
@@ -113,7 +129,7 @@ export function loadTrackBlocks(cityID: string, filePath: string) {
                     if (parts.length > 0 && parts[0]) {
                         const blockMatch = parts[0].match(/^(\d+)$/);
                         if (blockMatch) {
-                            blockNumber = parseInt(blockMatch[1], 10);
+                            blockNumber = parseInt(blockMatch[1]!, 10);
                         }
                     }
 
@@ -232,6 +248,18 @@ export function loadTrackBlocks(cityID: string, filePath: string) {
                     })
                     .filter(point => !isNaN(point[0]) && !isNaN(point[1]));
 
+                // Update track block bounding box
+                for (const point of points) {
+                    if (!trackBlockBoundingBox) {
+                        trackBlockBoundingBox = { minLat: point[0], maxLat: point[0], minLon: point[1], maxLon: point[1] };
+                    } else {
+                        trackBlockBoundingBox.minLat = Math.min(trackBlockBoundingBox.minLat, point[0]);
+                        trackBlockBoundingBox.maxLat = Math.max(trackBlockBoundingBox.maxLat, point[0]);
+                        trackBlockBoundingBox.minLon = Math.min(trackBlockBoundingBox.minLon, point[1]);
+                        trackBlockBoundingBox.maxLon = Math.max(trackBlockBoundingBox.maxLon, point[1]);
+                    }
+                }
+
                 if (points.length > 0) {
                     loadedBlocks.push({
                         name: id,
@@ -243,6 +271,11 @@ export function loadTrackBlocks(cityID: string, filePath: string) {
                         polygon: points,
                         routes,
                     });
+                    if (displayThreshold !== undefined) {
+                        maxDisplayThreshold = maxDisplayThreshold === undefined
+                            ? displayThreshold
+                            : Math.max(maxDisplayThreshold, displayThreshold);
+                    }
                 } else {
                     log(cityID, `trackblock.kml Placemark '${id}' had no valid coordinates`);
                 }
@@ -286,7 +319,18 @@ export function loadTrackBlocks(cityID: string, filePath: string) {
             trackBlocks.set(block.blockNumber, block);
         });
 
-    return trackBlocks;
+    if (loadedBlocks.length !== trackBlocks.size) {
+        const overwrittenBlocks = loadedBlocks.length - trackBlocks.size;
+        log(cityID, `Duplicate block numbers found in ${railNetwork.config.trackBlocks.fileName}, ${overwrittenBlocks} blocks were overwritten.`);
+    }
+
+    railNetwork.trackBlocks = trackBlocks;
+    railNetwork.maxDisplayThreshold = maxDisplayThreshold;
+    railNetwork.trackBlockBoundingBox = trackBlockBoundingBox;
+
+    // Save json version of track blocks for debugging
+    const debugOutputPath = path.resolve(railNetwork.configFolderPath, 'trackBlocks.json');
+    fs.writeFileSync(debugOutputPath, JSON.stringify(Array.from(trackBlocks.entries()), null, 2));
 }
 
 /**
@@ -389,7 +433,7 @@ function isRouteAllowed(trainRoute: string, rules: string[] | undefined): boolea
  * @param blockNumber Track block number to check
  * @returns True if the train is within the block's polygon, false otherwise
  */
-const trainInBlock = (trackBlocks: TrackBlockMap, train: TrainInfo, blockNumber: number): boolean => {
+export const trainInBlock = (trackBlocks: TrackBlockMap, train: TrainInfo, blockNumber: number): boolean => {
     const block = trackBlocks.get(blockNumber);
     if (block) {
         // If block routes are defined, check if the train's route is allowed in this block
@@ -416,20 +460,18 @@ const trainInBlock = (trackBlocks: TrackBlockMap, train: TrainInfo, blockNumber:
  * @returns Updated array of tracked trains with current positions and block assignments
  */
 export function updateTrackedTrains(
-    trackBlocks: TrackBlockMap | undefined,
+    railNetwork: RailNetwork,
     trackedTrains: TrainInfo[],
     gtfsTrains: Entity[],
-    displayThreshold: number,
     invisibleTrainIds: string[],
-    cityID: string,
 ): TrainInfo[] {
 
     // Synchronize GTFS train data with our tracked trains
     syncTrainData(trackedTrains, gtfsTrains);
 
     // Update track block assignments for all trains with valid positions
-    if (trackBlocks) {
-        assignBlocksToTrains(trackBlocks, trackedTrains, displayThreshold, invisibleTrainIds, cityID);
+    if (railNetwork.trackBlocks) {
+        assignBlocksToTrains(railNetwork, trackedTrains, invisibleTrainIds);
     }
 
     return trackedTrains;
@@ -499,29 +541,31 @@ function updateExistingTrainPosition(trackedTrain: TrainInfo, gtfsTrain: Entity)
 
         let newSpeed = newPosition?.speed;
 
-        if (newSpeed) {
-            if (newSpeed === 0 && trackedTrain.position.speed === 0) {
-                const SMOOTHING_FACTOR = 0.95;
-                trackedTrain.position.latitude = (
-                    trackedTrain.position.latitude * SMOOTHING_FACTOR +
-                    (newPosition?.latitude ?? 0) * (1 - SMOOTHING_FACTOR)
-                );
-                trackedTrain.position.longitude = (
-                    trackedTrain.position.longitude * SMOOTHING_FACTOR +
-                    (newPosition?.longitude ?? 0) * (1 - SMOOTHING_FACTOR)
-                );
-            }
-        } else {
+        if (!newSpeed) { // If GTFS feed doesn't provide speed, calculate it based on distance and time delta
             newSpeed = calculatedSpeed(trackedTrain.position.latitude, trackedTrain.position.longitude, newPosition?.latitude ?? 0, newPosition?.longitude ?? 0, trackedTrain.position.timestamp, gtfsTrain.vehicle?.timestamp ?? 0);
-            // log('WARN', `Calculated speed for train ${trackedTrain.trainId} as ${newSpeed.toFixed(2)} m/s`);
+        }
+
+
+        if (newSpeed > 2) { // 2 m/s = ~7 km/h
+            // Only update bearing if speed is reasonable (to avoid erratic bearing changes when stationary)
+            trackedTrain.position.bearing = newPosition?.bearing;
+        }
+
+        if (newSpeed <= 1) { // 1 m/s = ~3.6 km/h (treat as stationary and apply smoothing to position updates to reduce GPS jitter when stopped)
+            const SMOOTHING_FACTOR = 0.95;
+            trackedTrain.position.latitude = (
+                trackedTrain.position.latitude * SMOOTHING_FACTOR +
+                (newPosition?.latitude ?? 0) * (1 - SMOOTHING_FACTOR)
+            );
+            trackedTrain.position.longitude = (
+                trackedTrain.position.longitude * SMOOTHING_FACTOR +
+                (newPosition?.longitude ?? 0) * (1 - SMOOTHING_FACTOR)
+            );
+        } else {
             trackedTrain.position.latitude = newPosition?.latitude ?? 0;
             trackedTrain.position.longitude = newPosition?.longitude ?? 0;
         }
 
-        if (newSpeed > 2 && newSpeed < 55) { // 2 m/s = ~7 km/h and 55 m/s = ~198 km/h
-            // Only update bearing if speed is reasonable (to avoid erratic bearing changes when stationary)
-            trackedTrain.position.bearing = newPosition?.bearing;
-        }
 
         // Update other position properties
         trackedTrain.position.speed = newSpeed;
@@ -569,14 +613,29 @@ function addNewTrain(trackedTrains: TrainInfo[], gtfsTrain: Entity): void {
  * @param displayThreshold Time in seconds to display trains after their last update
  * @param invisibleTrainIds List of train IDs that should be hidden
  */
-function assignBlocksToTrains(trackBlocks: TrackBlockMap, trackedTrains: TrainInfo[], displayThreshold: number, invisibleTrainIds: string[], cityID: string): void {
+function assignBlocksToTrains(railNetwork: RailNetwork, trackedTrains: TrainInfo[], invisibleTrainIds: string[]): void {
+    const trackBlocks = railNetwork.trackBlocks;
+    if (!trackBlocks) return;
+
+    const displayThreshold = railNetwork.config.processingOptions.displayThreshold;
+    const maxDisplayThreshold = railNetwork.maxDisplayThreshold ?? displayThreshold;
     const now = Math.ceil(Date.now() / 1000);
 
     trackedTrains.forEach(train => {
+        // Skip really old positions
+        if (train.position.timestamp < now - maxDisplayThreshold) {
+            train.currentBlock = undefined;
+            train.previousBlock = undefined;
+            return;
+        }
+
         // 0. Sanity check coordinates (if invalid, instant stale)
         if (
-            train.position.latitude == 0 &&
-            train.position.longitude == 0
+            railNetwork.trackBlockBoundingBox &&
+            (train.position.latitude < railNetwork.trackBlockBoundingBox.minLat ||
+                train.position.latitude > railNetwork.trackBlockBoundingBox.maxLat ||
+                train.position.longitude < railNetwork.trackBlockBoundingBox.minLon ||
+                train.position.longitude > railNetwork.trackBlockBoundingBox.maxLon)
         ) {
             train.currentBlock = undefined;
             train.previousBlock = undefined;
@@ -592,11 +651,11 @@ function assignBlocksToTrains(trackBlocks: TrackBlockMap, trackedTrains: TrainIn
 
         if (inCurrentBlock) {
             // Train didn't move blocks.
-            // Update previousBlock to matches current
+            // Update previousBlock to match current
             train.previousBlock = train.currentBlock;
         } else {
             // Not in current block (or never had one). Search for block.
-            findAndSetTrainBlock(trackBlocks, train, cityID);
+            findAndSetTrainBlock(trackBlocks, train, railNetwork.id);
         }
 
         // 2. Check Staleness using Block Threshold
@@ -606,12 +665,12 @@ function assignBlocksToTrains(trackBlocks: TrackBlockMap, trackedTrains: TrainIn
             train.currentBlockDisplayThreshold = undefined;
         }
 
-        if (train.position.timestamp > now - displayThreshold && train.position.timestamp < now - train.currentBlockDisplayThreshold!) {
-            console.log(`Thershold = ${train.currentBlockDisplayThreshold} for train ${train.trainId} in block ${train.currentBlock}`);
-        }
+        // if (train.position.timestamp > now - displayThreshold && train.position.timestamp < now - train.currentBlockDisplayThreshold!) {
+        //     console.log(`Thershold = ${train.currentBlockDisplayThreshold} for train ${train.trainId} in block ${train.currentBlock}`);
+        // }
     });
 
-    updateAltBlocks(trackBlocks, trackedTrains, invisibleTrainIds, cityID);
+    updateAltBlocks(trackBlocks, trackedTrains, invisibleTrainIds, railNetwork.id);
 }
 
 function setTrainBlock(train: TrainInfo, blockNumber: number): void {
@@ -632,7 +691,7 @@ function setTrainBlock(train: TrainInfo, blockNumber: number): void {
  * @param train Train information
  * @param cityID City identifier (for logging)
  */
-function findAndSetTrainBlock(trackBlocks: TrackBlockMap, train: TrainInfo, cityID: string): void {
+export function findAndSetTrainBlock(trackBlocks: TrackBlockMap, train: TrainInfo, cityID: string): void {
     // TODO: Optimize this search by checking nearby blocks first
     for (const block of trackBlocks.values()) {
         if (trainInBlock(trackBlocks, train, block.blockNumber)) {
@@ -699,6 +758,8 @@ function findAndSetTrainBlock(trackBlocks: TrackBlockMap, train: TrainInfo, city
     }
 
     // Train is not in any known block
+    // console.log(`Train is not in any block (${train.position.latitude}, ${train.position.longitude}) route: ${train.route}`);
+
     train.currentBlock = undefined;
     train.previousBlock = undefined;
     train.currentBlockDisplayThreshold = undefined;

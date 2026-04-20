@@ -1,6 +1,6 @@
 # LED-Rails-Backend
 
-A backend service for real-time rail vehicle tracking for Live LED maps. Built with TypeScript, and Bun.
+A backend service for real-time rail vehicle tracking for Live LED maps. Built with TypeScript for Bun.
 
 This project is built for the Live Train Maps that I sell through my store: [keastudios.co.nz](https://keastudios.co.nz)
 
@@ -44,11 +44,9 @@ Endpoints use city code (e.g. AKL, WLG, MEL) and version (e.g. 100 for V1.0.0):
 | `/city/api/vehicles/trains`   | Filtered list of active trains     |
 | `/city-ltm/version.json`      | LED map update for the city board  |
 
-All endpoints are rate-limited by default.
-
 ## Configuration
 
-Set environment variables in `.env`:
+Set environment variables by creating a `.env` file and set :
 
 - `PORT`: Server port (default: 3000)
 - `AKL`, `WLG`: Add API keys for each city using their city ID
