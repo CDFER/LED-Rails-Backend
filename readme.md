@@ -23,7 +23,7 @@ This project is built for the Live Train Maps that I sell through my store: [kea
 - `trainPairs.ts` - Train pair detection and caching.
 - `cache.ts` - Caching to and from gzipped JSON files.
 - `customUtils.ts` - Utility functions, including colorized logging.
-- `map.html` - Leaflet-based web map for visualizing live train positions and track blocks (for debugging).
+- `map.html` - Leaflet-based web map for visualizing live train positions and track blocks.
 - `viewer.html` - Preview of the circuit board
 
 ### Currently Supported Networks
@@ -36,20 +36,27 @@ This project is built for the Live Train Maps that I sell through my store: [kea
 
 Endpoints use city code (e.g. AKL, WLG, MEL) and version (e.g. 100 for V1.0.0):
 
-| Endpoint                      | Description                        |
-|-------------------------------|------------------------------------|
-| `/`                           | Basic server status                |
-| `/status`                     | Server metrics and uptime          |
-| `/city/api/vehicles`          | All active vehicle entities        |
-| `/city/api/vehicles/trains`   | Filtered list of active trains     |
-| `/city-ltm/version.json`      | LED map update for the city board  |
+| Endpoint                       | Description                        |
+|--------------------------------|------------------------------------|
+| `/`                            | Basic server status                |
+| `/city-ltm/status`             | City-specific server metrics       |
+| `/city-ltm/api/vehicles`       | All active vehicle entities        |
+| `/city-ltm/api/vehicles/trains`| Filtered list of active trains     |
+| `/city-ltm/version.json`       | LED map update for the city board  |
+| `/city-ltm/api/viewer`         | Preview for the PCB                |
+| `/city-ltm/api/map`            | Map of the raw GTFS positions      |
+
 
 ## Configuration
 
-Set environment variables by creating a `.env` file and set :
+The ```.env``` file should just be placed in the root of the repo and just needs to contain one API key per line like this:
+```
+AKL=__Your__API__Key__Here__
+WLG=__Your__API__Key__Here__ 
+MEL=__Your__API__Key__Here__ 
+```
 
-- `PORT`: Server port (default: 3000)
-- `AKL`, `WLG`: Add API keys for each city using their city ID
+You can also set the server unsing `PORT=` (default: 3000)
 
 City-specific configurations are in `railNetworks/` and the documentation for the structure of `config.json` is at the top of `railNetwork.ts`.
 

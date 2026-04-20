@@ -327,10 +327,6 @@ export function loadTrackBlocks(railNetwork: RailNetwork): void {
     railNetwork.trackBlocks = trackBlocks;
     railNetwork.maxDisplayThreshold = maxDisplayThreshold;
     railNetwork.trackBlockBoundingBox = trackBlockBoundingBox;
-
-    // Save json version of track blocks for debugging
-    const debugOutputPath = path.resolve(railNetwork.configFolderPath, 'trackBlocks.json');
-    fs.writeFileSync(debugOutputPath, JSON.stringify(Array.from(trackBlocks.entries()), null, 2));
 }
 
 /**
