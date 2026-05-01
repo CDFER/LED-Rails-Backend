@@ -32,7 +32,7 @@ async function initializeServer() {
 
     for (const entry of await fs.readdir(railNetworksDir, { withFileTypes: true })) {
         if (entry.isDirectory()) {
-            railNetworks.push(new RailNetwork(path.join(railNetworksDir, entry.name)));
+            railNetworks.push(await new RailNetwork(path.join(railNetworksDir, entry.name)));
         }
     }
 

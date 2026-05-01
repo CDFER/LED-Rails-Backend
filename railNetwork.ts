@@ -89,7 +89,7 @@ export class RailNetwork {
     trackBlockBoundingBox: { minLat: number; maxLat: number; minLon: number; maxLon: number } | undefined;
     maxDisplayThreshold: number | undefined; // The maximum display threshold across all trackBlocks, used for more efficent train tracking
     stopsMap: Record<string, { stop_name: string; platform_code: string | undefined }> | undefined;
-    
+
     entities: Entity[] = [];
     ledRailsAPIs: LEDRailsAPI[] = [];
 
@@ -183,6 +183,10 @@ export class RailNetwork {
         // if (this.config.GTFSStaticAPI && this.config.GTFSStaticAPI.fetchIntervalDays) {
         //     this.updateStaticGTFS(); // Initial check on startup
         //     setInterval(() => { this.updateStaticGTFS(); }, this.config.GTFSStaticAPI.fetchIntervalDays * 24 * 3600 * 1000);
+        // } 
+
+        // if (this.config.GTFSStaticAPI) {
+        //     generateTimetable(this);
         // }
     }
 
@@ -198,7 +202,7 @@ export class RailNetwork {
             this.config.GTFSStaticAPI.keyHeader,
             this.config.GTFSStaticAPI.key
         )) {
-            // generateTimetable(this);
+            generateTimetable(this);
         }
     }
 
@@ -231,7 +235,7 @@ export class RailNetwork {
         }
 
         if (!response.ok) {
-            log(this.id, `Failed to fetch GTFS: ${response.status} ${response.statusText}`);
+            log(this.id, `Failed to fetch from ${URL}: ${response.status} ${response.statusText}`);
             return;
         }
 
@@ -434,16 +438,21 @@ export class RailNetwork {
 
             this.entities = this.entities.filter(entity => {
                 const vehicleTimestamp = entity.vehicle?.timestamp ? entity.vehicle.timestamp * 1000 : 0;
-                const ageMs = now - vehicleTimestamp;
+                const vehicleTimstampMs = vehicleTimestamp * 1000;
+                const ageMs = now - vehicleTimstampMs;
                 const isFresh = ageMs <= this.config.processingOptions.removeStaleVehiclesHours * 3600 * 1000;
                 return isFresh;
             });
 
+            const trainCountBefore = this.trackedTrains.length;
             this.trackedTrains = this.trackedTrains.filter(train => {
-                const ageMs = now - train.position.timestamp;
+                const trainTimestampMs = train.position.timestamp * 1000;
+                const ageMs = now - trainTimestampMs;
                 const isFresh = ageMs <= this.config.processingOptions.removeStaleVehiclesHours * 3600 * 1000;
                 return isFresh;
             });
+            const trainCountAfter = this.trackedTrains.length;
+            log(this.id, `Removed stale vehicles. Trains before: ${trainCountBefore}, after: ${trainCountAfter}`);
         }
     }
 }

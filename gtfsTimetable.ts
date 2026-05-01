@@ -440,7 +440,7 @@ export class TripSimulator {
         cityID: string,
         color: number[]
     ): BlockSequence {
-        const END_EXTRA_DWELL_SECONDS = 120-30; // Additional time to add at the end of the route
+        const END_EXTRA_DWELL_SECONDS = 120 - 30; // Additional time to add at the end of the route
         const START_EXTRA_DWELL_SECONDS = 120; // Time to add at the start of the route to ensure it appears on the display before moving
 
         const blocks: { blockNumber: number; offsetSeconds: number; }[] = [];
@@ -452,7 +452,7 @@ export class TripSimulator {
             departureTime: this.timeToSeconds(st.departure_time)
         })) : [];
 
-        let train: TrainInfo = {
+        const train: TrainInfo = {
             trainId: 'estimate',
             route: trip.route_id,
             position: {
@@ -632,7 +632,7 @@ export class TripSimulator {
 }
 
 
-function generateIssueShapesMap(
+export function generateIssueShapesMap(
     shapesWithIssues: string[],
     allShapes: Map<string, GTFSShapeRecord>,
     fixedShapes: Map<string, GTFSShapeRecord>,

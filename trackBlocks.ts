@@ -511,12 +511,12 @@ function addNewStopsFromTripUpdate(stops: { stopId: string; departureTime: numbe
             }
         }
 
-        // Remove stops with a departure time that are more than 20 mins in the past while keeping those with unknown departure times (0)
+        // Remove stops with a departure time that are more than 10 mins in the past while keeping those with unknown departure times (0)
         const now = Math.ceil(Date.now() / 1000);
-        stops = stops.filter(s => s.departureTime == 0 || s.departureTime >= now - 60 * 20);
+        stops = stops.filter(s => s.departureTime == 0 || s.departureTime >= now - 60 * 10);
 
-        // Sort stops by departure time (from oldest to furthest in the future)
-        stops.sort((a, b) => a.departureTime - b.departureTime);
+        // Sort stops by absolute seconds from now (closest to current time first)
+        stops.sort((a, b) => Math.abs(a.departureTime - now) - Math.abs(b.departureTime - now));
     }
 
     return stops.length > 0 ? stops : undefined;
@@ -669,7 +669,7 @@ function assignBlocksToTrains(railNetwork: RailNetwork, trackedTrains: TrainInfo
     updateAltBlocks(trackBlocks, trackedTrains, invisibleTrainIds, railNetwork.id);
 }
 
-function setTrainBlock(train: TrainInfo, blockNumber: number): void {
+function setTrainBlock(train: TrainInfo, blockNumber: number, displayThreshold: number | undefined): void {
     if (train.previousBlock === undefined) {
         // console.log(`Setting previousBlock for train ${train.trainId} to 0 (prevBlock was ${train.previousBlock} and currentBlock to ${blockNumber})`);
         train.previousBlock = 0; // Set previousBlock if not already set
@@ -678,6 +678,7 @@ function setTrainBlock(train: TrainInfo, blockNumber: number): void {
         // console.log(`Setting previousBlock for train ${train.trainId} to ${train.previousBlock} (currentBlock to ${blockNumber})`);
     }
     train.currentBlock = blockNumber;
+    train.currentBlockDisplayThreshold = displayThreshold;
 }
 
 /**
@@ -693,19 +694,18 @@ export function findAndSetTrainBlock(trackBlocks: TrackBlockMap, train: TrainInf
         if (trainInBlock(trackBlocks, train, block.blockNumber)) {
 
             if (block.platforms) {
-                // 1: Platforms with matching stop_ids
-                for (const platform of block.platforms) {
-                    if (!isRouteAllowed(train.route, platform.routes)) {
-                        continue; // Skip this platform if the train's route is not allowed
-                    }
+                // 1: Train stops matched against platform stop_ids (stop order takes priority)
+                if (train.stops && train.stops.length > 0) {
+                    for (const stop of train.stops) {
+                        for (const platform of block.platforms) {
+                            if (!isRouteAllowed(train.route, platform.routes)) {
+                                continue; // Skip this platform if the train's route is not allowed
+                            }
 
-                    // If the platform has stop_ids, check if the train is scheduled to stop there
-                    if (platform.stop_ids && train.stops) {
-                        const stopsIntersection = platform.stop_ids.filter(stopId => train.stops!.some(s => s.stopId === stopId));
-                        if (stopsIntersection.length > 0) {
-                            setTrainBlock(train, platform.blockNumber);
-                            train.currentBlockDisplayThreshold = block.displayThreshold;
-                            return;
+                            if (platform.stop_ids?.includes(stop.stopId)) {
+                                setTrainBlock(train, platform.blockNumber, block.displayThreshold);
+                                return;
+                            }
                         }
                     }
                 }
@@ -724,8 +724,7 @@ export function findAndSetTrainBlock(trackBlocks: TrackBlockMap, train: TrainInf
                                 const bearingDiff = Math.abs(platform.bearing - train.position.bearing);
                                 const normalizedBearingDiff = bearingDiff > 180 ? 360 - bearingDiff : bearingDiff;
                                 if (normalizedBearingDiff <= 90) {
-                                    setTrainBlock(train, platform.blockNumber);
-                                    train.currentBlockDisplayThreshold = block.displayThreshold;
+                                    setTrainBlock(train, platform.blockNumber, block.displayThreshold);
                                     return;
                                 }
                             }
@@ -739,15 +738,13 @@ export function findAndSetTrainBlock(trackBlocks: TrackBlockMap, train: TrainInf
                         continue; // Skip this platform if the train's route is not allowed
                     }
                     if (platform.isDefault && !platform.bearing) {
-                        setTrainBlock(train, platform.blockNumber);
-                        train.currentBlockDisplayThreshold = block.displayThreshold;
+                        setTrainBlock(train, platform.blockNumber, block.displayThreshold);
                         return;
                     }
                 }
 
             } else {
-                setTrainBlock(train, block.blockNumber);
-                train.currentBlockDisplayThreshold = block.displayThreshold;
+                setTrainBlock(train, block.blockNumber, block.displayThreshold);
                 return;
             }
         }

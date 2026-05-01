@@ -3,7 +3,7 @@ import path from 'path';
 import { log } from './customUtils';
 import AdmZip from 'adm-zip';
 import { RailNetwork } from './railNetwork';
-import { TripSimulator, staticGTFSQuery, BlockSequence, generateTripTimeMap } from './gtfsTimetable';
+import { TripSimulator, staticGTFSQuery, BlockSequence, generateTripTimeMap, generateIssueShapesMap } from './gtfsTimetable';
 import { calculateDistance } from './trainPairs';
 import { HeaderGenerator } from './headerGenerator';
 
@@ -268,6 +268,9 @@ export async function generateTimetable(network: RailNetwork): Promise<void> {
 
                 let allShapes = gtfsQuery.getAllShapes();
 
+                // Keep a copy of the original shapes for debugging purposes
+                const originalShapes = new Map(allShapes);
+
                 const simulator = new TripSimulator();
 
                 // remove appendages from shapes
@@ -280,7 +283,7 @@ export async function generateTimetable(network: RailNetwork): Promise<void> {
                 for (const trip of trips) {
                     const route = trip?.route_id;
                     const tripColor = network.config.LEDRailsAPI.colors?.[route];
-                    const shape = allShapes.get(trip.shape_id);                   
+                    const shape = allShapes.get(trip.shape_id);
 
 
                     if (shape && network.trackBlocks && tripColor) {

@@ -20,7 +20,7 @@
     "removeStaleVehiclesHours": 24,
     "cacheGTFS": true,
     "cacheTrackedTrains": true,
-    "cacheIntervalSeconds": 360
+    "cacheIntervalSeconds": 60
   },
   "trainFilter": {
     "trip_ID": {

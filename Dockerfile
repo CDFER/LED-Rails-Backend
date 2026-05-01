@@ -1,5 +1,5 @@
 # Dockerfile
-FROM oven/bun:1.3.9-alpine AS base
+FROM oven/bun:1.3.13-alpine AS base
 WORKDIR /usr/src/app
 
 # install dependencies into temp directory
