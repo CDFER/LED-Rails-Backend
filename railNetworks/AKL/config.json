@@ -2,7 +2,7 @@
   "GTFSRealtimeAPI": {
     "url": ["https://api.at.govt.nz/realtime/legacy"],
     "keyHeader": "Ocp-Apim-Subscription-Key",
-    "fetchIntervalSeconds": 19,
+    "fetchIntervalSeconds": 20,
     "format": "GTFSRealtime"
   },
   "trainFilter": {
@@ -14,7 +14,7 @@
   "processingOptions": {
     "pairTrains": true,
     "cacheGTFS": true,
-    "cacheIntervalSeconds": 259,
+    "cacheIntervalSeconds": 60,
     "displayThreshold": 900
   },
   "trackBlocks": {

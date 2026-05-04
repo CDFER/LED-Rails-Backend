@@ -98,6 +98,8 @@ export class RailNetwork {
     trackedTrains: TrainInfo[] = [];
     trainEntities: Entity[] = [];
 
+    worstUpdateTimeMS: number | undefined; // A moving worst case average Time taken for the the full GTFS fetch
+
     /**
      * Constructs a RailNetwork instance from a config folder.
      *
@@ -157,7 +159,6 @@ export class RailNetwork {
                     routeToColorId,
                     url: `/${this.id.toLowerCase()}-ltm/${version}.json`,
                     blockRemap: blockRemap,
-                    displayThreshold: this.config.processingOptions.displayThreshold,
                     randomizeTimeOffset: this.config.LEDRailsAPI.randomizeTimeOffset || false,
                     updateInterval: this.config.GTFSRealtimeAPI.fetchIntervalSeconds,
                     output: {
@@ -212,9 +213,17 @@ export class RailNetwork {
      * Fetches new GTFS data, updates tracked trains, and refreshes LED API state.
      */
     async update() {
+        const startTime = Date.now();
         await this.getGTFSRealtimeData();
         if (this.ledRailsAPIs.length > 0) {
             this.updateLEDRailsAPIs();
+        }
+        const endTime = Date.now();
+        if (!this.worstUpdateTimeMS || endTime - startTime > this.worstUpdateTimeMS) {
+            this.worstUpdateTimeMS = endTime - startTime;
+        } else {
+            // Add some smoothing to the worst case update time so it goes down over time
+            this.worstUpdateTimeMS = this.worstUpdateTimeMS * 0.9 + (endTime - startTime) * 0.1;
         }
     }
 
@@ -402,7 +411,7 @@ export class RailNetwork {
         for (let index = 0; index < this.ledRailsAPIs.length; index++) {
             const api = this.ledRailsAPIs[index];
             if (api) {
-                this.ledRailsAPIs[index] = generateLedMap(api, this.trackedTrains, this.invisibleTrains, this.trackBlocks);
+                this.ledRailsAPIs[index] = generateLedMap(api, this.trackedTrains, this.invisibleTrains, this.trackBlocks, this.worstUpdateTimeMS);
             }
         }
     }
@@ -444,15 +453,12 @@ export class RailNetwork {
                 return isFresh;
             });
 
-            const trainCountBefore = this.trackedTrains.length;
             this.trackedTrains = this.trackedTrains.filter(train => {
                 const trainTimestampMs = train.position.timestamp * 1000;
                 const ageMs = now - trainTimestampMs;
                 const isFresh = ageMs <= this.config.processingOptions.removeStaleVehiclesHours * 3600 * 1000;
                 return isFresh;
             });
-            const trainCountAfter = this.trackedTrains.length;
-            log(this.id, `Removed stale vehicles. Trains before: ${trainCountBefore}, after: ${trainCountAfter}`);
         }
     }
 }

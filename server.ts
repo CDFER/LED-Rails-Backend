@@ -7,6 +7,7 @@ import { LOG_LABELS, log } from './customUtils';
 import { RailNetwork } from './railNetwork';
 
 const PORT = 3000;
+const NETWORK_UPDATE_STAGGER_MS = 1500;
 
 // --- Configuration Loading ---
 loadEnv({ quiet: true }); // Load environment variables from .env file
@@ -16,6 +17,8 @@ type RouteHandler = (req: Request) => Response | Promise<Response>;
 
 async function initializeServer() {
     const routes = new Map<string, RouteHandler>();
+    let configuredNetworkCount = 0;
+
     const addRoute = (method: string, url: string, handler: RouteHandler) => {
         if (method === 'GET') routes.set(url, handler);
     };
@@ -46,7 +49,7 @@ async function initializeServer() {
         } else {
 
             try {
-                await network.update();
+                network.update();
 
                 // Setup server endpoints for each board revision api
                 network.ledRailsAPIs.forEach(api => {
@@ -106,17 +109,23 @@ async function initializeServer() {
                     headers: { "Content-Type": "image/svg+xml" }
                 }));
 
-                // Periodic update loop
-                setInterval(() => {
-                    try {
-                        network.update();
-                    } catch (error) {
-                        log(network.id, 'Error Updating', {
-                            errorMessage: error instanceof Error ? error.message : String(error),
-                            stack: error instanceof Error ? error.stack : undefined
-                        });
-                    }
-                }, network.config.GTFSRealtimeAPI.fetchIntervalSeconds * 1000);
+                // Periodic update loop (stagger network start times by at least 1.5s)
+                const intervalMs = network.config.GTFSRealtimeAPI.fetchIntervalSeconds * 1000;
+                const initialDelayMs = configuredNetworkCount * NETWORK_UPDATE_STAGGER_MS;
+                configuredNetworkCount += 1;
+
+                setTimeout(() => {
+                    setInterval(async () => {
+                        try {
+                            await network.update();
+                        } catch (error) {
+                            log(network.id, 'Error Updating', {
+                                errorMessage: error instanceof Error ? error.message : String(error),
+                                stack: error instanceof Error ? error.stack : undefined
+                            });
+                        }
+                    }, intervalMs);
+                }, initialDelayMs);
 
                 // Log some info about the rail network after setup
                 log(network.id, 'Setup', {
@@ -146,12 +155,34 @@ async function initializeServer() {
         port: PORT,
         development: process.env.NODE_ENV !== "production",
         async fetch(req) {
-            const url = new URL(req.url);
-            const handler = routes.get(url.pathname);
+            let pathname = '/';
+            try {
+                const url = req.url.startsWith('/')
+                    ? new URL(req.url, 'http://localhost')
+                    : new URL(req.url);
+                pathname = url.pathname;
+            } catch (error) {
+                log(LOG_LABELS.SERVER, 'Invalid request URL', {
+                    reqUrl: req.url,
+                    errorMessage: error instanceof Error ? error.message : String(error),
+                });
+                return new Response('Bad Request', { status: 400 });
+            }
+
+            const handler = routes.get(pathname);
 
             let response: Response;
             if (handler && req.method === 'GET') {
-                response = await handler(req);
+                try {
+                    response = await handler(req);
+                } catch (error) {
+                    log(LOG_LABELS.SERVER, 'Route handler error', {
+                        path: pathname,
+                        errorMessage: error instanceof Error ? error.message : String(error),
+                        stack: error instanceof Error ? error.stack : undefined,
+                    });
+                    response = new Response('Internal Server Error', { status: 500 });
+                }
             } else {
                 response = new Response("Not Found", { status: 404 });
             }
@@ -172,9 +203,10 @@ async function initializeServer() {
                 compressionFormat = "deflate";
             }
 
-            if (compressionFormat && response.body) {
+            if (compressionFormat && response.body && !response.headers.has('Content-Encoding')) {
                 const headers = new Headers(response.headers);
                 headers.set("Content-Encoding", compressionFormat === "brotli" ? "br" : compressionFormat);
+                headers.set("Vary", "Accept-Encoding");
                 headers.delete("Content-Length");
 
                 return new Response(response.body.pipeThrough(new CompressionStream(compressionFormat as CompressionFormat)), {

@@ -2,7 +2,7 @@
   "GTFSRealtimeAPI": {
     "url": ["https://api.opendata.metlink.org.nz/v1/gtfs-rt/vehiclepositions"],
     "keyHeader": "x-api-key",
-    "fetchIntervalSeconds": 9,
+    "fetchIntervalSeconds": 10,
     "format": "FeedMessage",
     "protocol": "protobuf"
   },
@@ -14,7 +14,7 @@
   "processingOptions": {
     "pairTrains": false,
     "cacheGTFS": true,
-    "cacheIntervalSeconds": 258,
+    "cacheIntervalSeconds": 60,
     "displayThreshold": 120
   },
   "trackBlocks": {

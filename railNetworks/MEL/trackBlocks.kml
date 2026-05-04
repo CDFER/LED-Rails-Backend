@@ -755,7 +755,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>219 - Lilydale  {TIME&lt;600}</name>
+			<name>219 - Lilydale  {TIME&lt;800}</name>
 			<description>220,&quot;12165&quot;,
 219,&quot;12164&quot;,Default,</description>
 			<styleUrl>#msn_ylw-pushpin200</styleUrl>
@@ -1001,7 +1001,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>246 - Belgrave  {TIME&lt;600}</name>
+			<name>246 - Belgrave  {TIME&lt;800}</name>
 			<description>247,&quot;11120&quot;,Default,
 246,&quot;11119&quot;,</description>
 			<styleUrl>#msn_ylw-pushpin200</styleUrl>
@@ -1182,21 +1182,21 @@
 				<outerBoundaryIs>
 					<LinearRing>
 						<coordinates>
-							145.0794969008549,-37.86645934193003,0 145.0804568713598,-37.8665592569544,0 145.0814148184863,-37.86364943180315,0 145.0801524407531,-37.8634995307986,0 145.0794969008549,-37.86645934193003,0 
+							145.0796810118115,-37.86566007239932,0 145.0806278811801,-37.8657632891141,0 145.0814148184863,-37.86364943180315,0 145.0801524407531,-37.8634995307986,0 145.0796810118115,-37.86566007239932,0 
 						</coordinates>
 					</LinearRing>
 				</outerBoundaryIs>
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>268 - Alamein  {TIME&lt;600}</name>
+			<name>268 - Alamein {TIME&lt;800}</name>
 			<styleUrl>#msn_ylw-pushpin200</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
 				<outerBoundaryIs>
 					<LinearRing>
 						<coordinates>
-							145.0783377770569,-37.86999307242843,0 145.0802592750526,-37.87023698886436,0 145.0807660074363,-37.86649154701814,0 145.0792726070749,-37.86627438587082,0 145.0783377770569,-37.86999307242843,0 
+							145.0783377770569,-37.86999307242843,0 145.0802592750526,-37.87023698886436,0 145.0808255467024,-37.86573057412017,0 145.0793813339332,-37.86555183784905,0 145.0783377770569,-37.86999307242843,0 
 						</coordinates>
 					</LinearRing>
 				</outerBoundaryIs>
@@ -1571,7 +1571,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>315 - Glen Waverley  {TIME&lt;600}</name>
+			<name>315 - Glen Waverley  {TIME&lt;800}</name>
 			<description>316,&quot;12159&quot;,Default,
 315,&quot;12158&quot;,</description>
 			<styleUrl>#msn_ylw-pushpin200</styleUrl>
@@ -4531,7 +4531,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>1294 - Mernda  {TIME&lt;600}</name>
+			<name>1294 - Mernda  {TIME&lt;800}</name>
 			<description>1294,&quot;26517&quot;,Default,190deg,
 1295,&quot;26518&quot;,Default,10deg,</description>
 			<styleUrl>#msn_ylw-pushpin200</styleUrl>
@@ -5068,7 +5068,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>1359 - Hurstbridge  {TIME&lt;600}</name>
+			<name>1359 - Hurstbridge  {TIME&lt;800}</name>
 			<styleUrl>#msn_ylw-pushpin200</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -6408,7 +6408,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>873 - Werribee  {TIME&lt;600}</name>
+			<name>873 - Werribee  {TIME&lt;800}</name>
 			<description>873,&quot;13731&quot;,
 874,&quot;13732&quot;,Default,
 875,&quot;13733&quot;,</description>
@@ -6605,7 +6605,7 @@
 			</Polygon>
 		</Placemark>
 		<Placemark>
-			<name>894 - Williamstown  {TIME&lt;600}</name>
+			<name>894 - Williamstown  {TIME&lt;800}</name>
 			<styleUrl>#msn_ylw-pushpin200</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -7009,6 +7009,7 @@
 	</Folder>
 	<Folder>
 		<name>City Loop</name>
+		<open>1</open>
 		<Placemark>
 			<name>1400 - Southern Cross [aus:vic:vic-01]</name>
 			<description>1400,&quot;22240&quot;;&quot;22254&quot;,Default,330Deg,
@@ -7148,14 +7149,13 @@
 1443,&quot;12259&quot;,
 1442,&quot;12258&quot;,
 1441,&quot;12257&quot;,
-1440
-1439
-1438,&quot;12256&quot;,Default,108deg,
-1437,&quot;12255&quot;,Default,288deg,
+1440,&quot;11217&quot;,&quot;12256&quot;,
+1439,&quot;11218&quot;,&quot;12255&quot;,
+1438,
+1437,
 1436,&quot;12254&quot;,
 1435,&quot;12253&quot;,</description>
 			<styleUrl>#msn_ylw-pushpin200</styleUrl>
-			<gx:balloonVisibility>1</gx:balloonVisibility>
 			<Polygon>
 				<tessellate>1</tessellate>
 				<outerBoundaryIs>

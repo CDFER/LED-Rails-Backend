@@ -17,12 +17,12 @@ This project is built for the Live Train Maps that I sell through my store: [kea
 
 ## Project Structure
 
-- `server.ts` - Main Express server, API endpoints, and periodic data refresh logic.
+- `server.ts` - Main Bun webserver, API endpoints, and periodic data refresh logic.
 - `railNetwork.ts` - City-specific configuration loader and documentation for `config.json` structure.
 - `trackBlocks.ts` - KML parsing, block occupancy, and LED map update logic.
 - `trainPairs.ts` - Train pair detection and caching.
 - `cache.ts` - Caching to and from gzipped JSON files.
-- `customUtils.ts` - Utility functions, including colorized logging.
+- `customUtils.ts` - Utility functions, including timestamped & colorized logging.
 - `map.html` - Leaflet-based web map for visualizing live train positions and track blocks.
 - `viewer.html` - Preview of the circuit board
 
