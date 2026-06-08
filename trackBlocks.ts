@@ -158,7 +158,13 @@ export function loadTrackBlocks(railNetwork: RailNetwork): void {
 
                     // Parse bearing by checking for pattern "XXXdeg" in any part
                     for (const part of parts) {
-                        if (part.includes('deg')) {
+                        if (part.toLowerCase().includes('deg')) {
+                            // Check for invalid capitalization of 'deg' (e.g., 'Deg', 'DEG')
+                            const degMatches = part.match(/deg/gi);
+                            if (degMatches && degMatches.some(m => m !== 'deg')) {
+                                log(cityID, `Warning: Invalid capitalization for 'deg' in trackblock configuration: '${part}' in placemark '${id}'. Expected lowercase 'deg'.`);
+                            }
+
                             const bearingMatch = part.match(/^(-?\d+)deg$/);
                             if (bearingMatch && bearingMatch[1]) {
                                 bearing = parseInt(bearingMatch[1], 10);
@@ -324,6 +330,11 @@ export function loadTrackBlocks(railNetwork: RailNetwork): void {
         const overwrittenBlocks = loadedBlocks.length - trackBlocks.size;
         log(cityID, `Duplicate block numbers found in ${railNetwork.config.trackBlocks.fileName}, ${overwrittenBlocks} blocks were overwritten.`);
     }
+
+    // Save to json for debugging
+    // const debugOutputPath = path.resolve(railNetwork.configFolderPath, 'trackBlocks_debug.json');
+    // fs.writeFileSync(debugOutputPath, JSON.stringify(
+    //     Array.from(trackBlocks.values()), null, 2));
 
     railNetwork.trackBlocks = trackBlocks;
     railNetwork.maxDisplayThreshold = maxDisplayThreshold;
@@ -799,6 +810,28 @@ export function findAndSetTrainBlock(trackBlocks: TrackBlockMap, train: TrainInf
         }
         if (processBlock(block, trackBlocks, train)) return;
     }
+
+    // If train has a route that includes "aus:vic:vic-02" but isn't in any block, log to CSV
+    // if (train.route.includes("aus:vic:vic-02")) {
+        
+    //     const logFilePath = path.resolve(__dirname, 'train_location_log.csv');
+    //     // Add headers if file doesn't exist
+    //     if (!fs.existsSync(logFilePath)) {
+    //         fs.writeFileSync(logFilePath, 'Latitude,Longitude,Message,Stops\n');
+    //     }
+        
+    //     const message = `Train ${train.trainId} on route ${train.route} currentParentBlock: ${train.currentParentBlock} previousBlock: ${train.previousBlock} heading: ${train.position.bearing?.toFixed(2)} speed: ${train.position.speed?.toFixed(2)}`;
+    //     const logEntryLine = `${train.position.latitude},${train.position.longitude},${message},${train.stops?.map(s => s.stopId).join('|') ?? ''}`;
+        
+    //     // Check if this exact entry already exists in the log
+    //     const logContent = fs.readFileSync(logFilePath, 'utf-8');
+    //     const entryExists = logContent.split('\n').some(line => line.trim() === logEntryLine);
+
+    //     if (!entryExists) {
+    //         fs.appendFileSync(logFilePath, logEntryLine + '\n');
+    //         log(cityID, `Logged train location to CSV: ${message}`);
+    //     }
+    // }
 
     // Train is not in any known block
     train.currentBlock = undefined;

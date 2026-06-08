@@ -16,7 +16,8 @@
     "cacheGTFS": true,
     "cacheTrackedTrains": true,
     "cacheIntervalSeconds": 360,
-    "displayThreshold": 900
+    "displayThreshold": 900,
+    "removeStaleVehiclesHours": 8760
   },
   "trackBlocks": {
     "fileName": "trackBlocks.kml"
