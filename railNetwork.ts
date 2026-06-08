@@ -178,7 +178,7 @@ export class RailNetwork {
 
         if (this.config.processingOptions.removeStaleVehiclesHours) {
             this.removeStaleVehicles(); // Initial cleanup on startup
-            setInterval(() => { this.removeStaleVehicles(); }, this.config.processingOptions.removeStaleVehiclesHours * 3600 * 1000);
+            setInterval(() => { this.removeStaleVehicles(); }, 3600 * 1000); // Run cleanup every hour
         }
 
         // if (this.config.GTFSStaticAPI && this.config.GTFSStaticAPI.fetchIntervalDays) {

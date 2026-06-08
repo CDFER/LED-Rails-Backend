@@ -4540,7 +4540,7 @@
 				<outerBoundaryIs>
 					<LinearRing>
 						<coordinates>
-							145.1002402342294,-37.60400690473465,0 145.1008217181752,-37.60408318676156,0 145.1023481994709,-37.5980761911096,0 145.100995210329,-37.59801210829352,0 145.1002402342294,-37.60400690473465,0 
+							145.1002402342294,-37.60400690473465,0 145.1008217181752,-37.60408318676156,0 145.1016131915597,-37.6007698182412,0 145.1009478323239,-37.60069670807343,0 145.1002402342294,-37.60400690473465,0 
 						</coordinates>
 					</LinearRing>
 				</outerBoundaryIs>
@@ -7078,8 +7078,8 @@
 1420,&quot;22189&quot;;&quot;11213&quot;;&quot;11214&quot;,
 1421,&quot;22188&quot;;&quot;22187&quot;:&quot;11212&quot;,
 
-1416,Default,270Deg,
-1417,Default,90Deg,</description>
+1416,Default,255Deg,
+1417,Default,75Deg,</description>
 			<styleUrl>#msn_ylw-pushpin200</styleUrl>
 			<Polygon>
 				<tessellate>1</tessellate>
@@ -7098,9 +7098,9 @@
 1433,&quot;12202&quot;,
 
 1422,&quot;12203&quot;,
-1423,&quot;12204&quot;,Default,270deg,
-1424,&quot;12205&quot;,Default,90deg,
-1425,&quot;11218&quot;,
+1423,&quot;12204&quot;,
+1424,&quot;12205&quot;,
+1425,&quot;11218&quot;;&quot;22238&quot;,
 1426,&quot;11217&quot;,
 1427,&quot;11216&quot;,
 1428,&quot;11215&quot;,
@@ -7121,7 +7121,6 @@
 		</Placemark>
 		<Placemark>
 			<name>1434 PLT14 Flinders Street  [aus:vic:vic-02-MDD:,aus:vic:vic-02-HBE:]</name>
-			<open>1</open>
 			<description>1434,&quot;11212&quot;,</description>
 			<styleUrl>#msn_ylw-pushpin200</styleUrl>
 			<Polygon>
@@ -7146,8 +7145,9 @@
 1445,&quot;12260&quot;
 1444,&quot;12262&quot;,
 1443,&quot;12259&quot;,
-1442,&quot;12258&quot;,
-1441,&quot;12257&quot;,
+1442,&quot;12258&quot;,Default,90deg,[aus:vic:vic-01-TRN:],
+1441,&quot;12257&quot;,Default,270deg,[aus:vic:vic-01-TRN:],
+
 1440,&quot;11217&quot;,&quot;12256&quot;,
 1439,&quot;11218&quot;,&quot;12255&quot;,
 1438,

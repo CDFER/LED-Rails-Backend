@@ -318,19 +318,18 @@
         function getVehiclePopupContent(vehicleInfo, vehicleId, trip, direction, latitude, longitude, position, vehicleData, entity) {
             const stopIds = entity.tripUpdate?.stopTimeUpdate?.map(stu => stu.stopId) || [];
             const stops = stopsMap ? stopIds.map(id => stopsMap[id]) : [];
+            // ${latitude !== undefined && longitude !== undefined ? `${latitude.toFixed(5)}, ${longitude.toFixed(5)}<br>` : ''}
             return `
-                ${vehicleInfo?.label ? `<b>Label:</b> ${vehicleInfo.label.toUpperCase()}<br>` : ''}
-                ${vehicleId ? `<b>Vehicle ID:</b> ${vehicleId}<br>` : ''}
+                ${vehicleInfo?.label ? `<b>${vehicleInfo.label.toUpperCase()}</b><br>` : ''}
+                ${vehicleInfo?.label ? `<b>ID:</b> ${vehicleId}<br>` : `<b>${vehicleId}</b><br>`}
+                ${vehicleData?.timestamp ? `<b>Updated:</b> <span class="live-relative-time" data-timestamp="${vehicleData.timestamp * 1000}">${getRelativeTime(vehicleData.timestamp * 1000)}</span><br>` : ''}
                 ${trip?.route_id ? `<b>Route:</b> ${trip.route_id + (direction || '')}<br>` : ''}
                 ${trip?.routeId ? `<b>Route:</b> ${trip.routeId}<br>` : ''}
                 ${trip?.trip_id ? `<b>Trip:</b> ${trip.trip_id}<br>` : ''}
                 ${trip?.tripId ? `<b>Trip:</b> ${trip.tripId}<br>` : ''}
-                ${latitude !== undefined ? `<b>Lat:</b> ${latitude.toFixed(5)}<br>` : ''}
-                ${longitude !== undefined ? `<b>Lon:</b> ${longitude.toFixed(5)}<br>` : ''}
-                ${position?.bearing !== undefined ? `<b>Bearing:</b> ${Number(position.bearing).toFixed(0)}°<br>` : ''}
+                ${position?.bearing !== undefined ? `<b>Heading:</b> ${Number(position.bearing).toFixed(0)}°<br>` : ''}
                 ${position?.speed !== undefined ? `<b>Speed:</b> ${(position.speed * 3.6).toFixed(0)}km/h<br>` : ''}
                 ${position?.odometer !== undefined ? `<b>Odometer:</b> ${Number((position.odometer / 1000).toFixed(0)).toLocaleString('en-NZ')} km<br>` : ''}
-                ${vehicleData?.timestamp ? `<b>Last Update:</b> <span class="live-relative-time" data-timestamp="${vehicleData.timestamp * 1000}">${getRelativeTime(vehicleData.timestamp * 1000)}</span><br>` : ''}
                 ${(() => {
                     if (stopIds.length === 0) return '';
                     const stopList = stops.map((s, i) => {
